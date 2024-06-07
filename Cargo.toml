@@ -1,0 +1,15 @@
+[package]
+name = "ragtime"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test-encode"
+
+[dependencies]
+ort = "2.0.0-rc.2"
+anyhow = "1"
+tracing-subscriber = "0.3"
+tokenizers = "0.19"
+ndarray = "0.15"
+usearch = { version = "2.12.0", features = ["fp16lib"] }

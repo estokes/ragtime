@@ -7,7 +7,8 @@ edition = "2021"
 name = "test-encode"
 
 [dependencies]
-ort = "2.0.0-rc.2"
+#ort = "2.0.0-rc.2"
+ort = { git = "https://github.com/pykeio/ort.git" }
 anyhow = "1"
 tracing-subscriber = "0.3"
 tokenizers = "0.19"

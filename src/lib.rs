@@ -1,9 +1,18 @@
 use anyhow::{anyhow, bail, Result};
-use ndarray::{s, Array2, Axis};
-use ort::{inputs, Session, SessionOutputs};
-use std::{path::Path, thread::available_parallelism};
+use ndarray::{s, Array1, Array2, Array4, Array5, ArrayBase, Axis, Dim, ViewRepr};
+use ort::{inputs, DynValue, Session, SessionInputValue, SessionOutputs};
+use std::{collections::HashMap, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
+
+fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
+    let session = Session::builder()?
+        .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
+        .with_intra_threads(available_parallelism()?.get())?
+        .commit_from_file(model)?;
+    let tokenizer = Tokenizer::from_file(tokenizer).map_err(|e| anyhow!("{e:?}"))?;
+    Ok((session, tokenizer))
+}
 
 pub struct EmbedDb {
     session: Session,
@@ -14,11 +23,7 @@ pub struct EmbedDb {
 
 impl EmbedDb {
     pub fn new<P: AsRef<Path>>(model: P, tokenizer: P, dims: usize) -> Result<Self> {
-        let session = Session::builder()?
-            .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
-            .with_intra_threads(available_parallelism()?.get())?
-            .commit_from_file(model)?;
-        let tokenizer = Tokenizer::from_file(tokenizer).map_err(|e| anyhow!("{e:?}"))?;
+        let (session, tokenizer) = session_from_model_file(model, tokenizer)?;
         let mut opts = IndexOptions::default();
         opts.dimensions = dims;
         opts.metric = MetricKind::Cos;
@@ -95,5 +100,55 @@ impl EmbedDb {
             bail!("no such embedding {i}")
         }
         Ok(&self.embeddings[key as usize])
+    }
+}
+
+pub struct QaModel {
+    session: Session,
+    tokenizer: Tokenizer,
+}
+
+impl QaModel {
+    pub fn new<T: AsRef<Path>>(model: T, tokenizer: T) -> Result<Self> {
+        let (session, tokenizer) = session_from_model_file(model, tokenizer)?;
+        println!("{:?}", session.inputs);
+        Ok(Self { session, tokenizer })
+    }
+
+    fn encode_args(
+        &self,
+        len: usize,
+        inputs: ArrayBase<ViewRepr<&i64>, Dim<[usize; 2]>>,
+        attention_mask: ArrayBase<ViewRepr<&i64>, Dim<[usize; 2]>>,
+    ) -> Result<HashMap<String, SessionInputValue>> {
+        let mut args: HashMap<String, SessionInputValue> = HashMap::default();
+        for inp in &self.session.inputs {
+            if inp.name != "input_ids" && inp.name != "attention_mask" {
+                let v = DynValue::try_from(Array4::<f32>::zeros((1, 32, len, 96)))?;
+                args.insert(inp.name.clone().into(), v.into());
+            }
+        }
+        let inputs = DynValue::try_from(inputs)?;
+        let attention_mask = DynValue::try_from(attention_mask)?;
+        args.insert("input_ids".into(), inputs.into());
+        args.insert("attention_mask".into(), attention_mask.into());
+        Ok(args)
+    }
+
+    pub fn ask(&self, question: &str, gen: usize) -> Result<String> {
+        let encoded = self
+            .tokenizer
+            .encode(question, false)
+            .map_err(|e| anyhow!("{e:?}"))?;
+        let mut tokens = Array1::from_iter(encoded.get_ids().iter().map(|t| *t as i64));
+        let mut attn_mask = Array1::from_iter(encoded.get_ids().iter().map(|_| 1i64));
+        {
+            let tokens_view = tokens.view().insert_axis(Axis(0));
+            let attn_mask_view = attn_mask.view().insert_axis(Axis(0));
+            let args = self.encode_args(tokens.len(), tokens_view, attn_mask_view)?;
+            let outputs = self.session.run(args)?;
+            println!("{outputs:?}")
+        }
+        Ok("hi".into())
     }
 }

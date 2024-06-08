@@ -20,12 +20,17 @@ fn test_encode() -> Result<()> {
 }
 
 fn test_gen() -> Result<()> {
-    const BASE: &str = "/home/eric/proj/Phi-3-mini-128k-instruct-onnx/cpu_and_mobile/cpu-int4-rtn-block-32";
+    const BASE: &str =
+        "/home/eric/proj/Phi-3-mini-128k-instruct-onnx/cpu_and_mobile/cpu-int4-rtn-block-32";
     let gen = QaModel::new(
         &format!("{BASE}/phi3-mini-128k-instruct-cpu-int4-rtn-block-32.onnx"),
         &format!("{BASE}/tokenizer.json"),
     )?;
-    gen.ask("what color is the moon?", 30)?;
+    let a = gen.ask(
+        "<|user|>what color is the moon? <|end|>\n<|assistant|>",
+        1000,
+    )?;
+    println!("{a}");
     Ok(())
 }
 

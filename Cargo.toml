@@ -3,6 +3,12 @@ name = "ragtime"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = true
+debug = false
+
 [[bin]]
 name = "test-encode"
 
@@ -14,3 +20,4 @@ tracing-subscriber = "0.3"
 tokenizers = "0.19"
 ndarray = "0.15"
 usearch = { version = "2.12.0", features = ["fp16lib"] }
+half = { version = "2.4.1", features = ["num-traits"] }

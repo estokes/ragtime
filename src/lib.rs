@@ -1,9 +1,134 @@
 use anyhow::{anyhow, bail, Result};
+use memmap2::Mmap;
 use ndarray::{array, concatenate, s, Array1, Array2, Array4, ArrayBase, Axis, Dim, ViewRepr};
 use ort::{inputs, DynValue, Session, SessionInputValue, SessionOutputs};
-use std::{collections::HashMap, path::Path, thread::available_parallelism};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fs::File,
+    path::{Path, PathBuf},
+    thread::available_parallelism,
+};
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DocId(u32);
+
+impl DocId {
+    pub fn new() -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+struct MappedDoc {
+    file: File,
+    map: Mmap,
+}
+
+pub struct ChunkIter<'a> {
+    id: DocId,
+    data: &'a [u8],
+    pos: usize,
+    tokens: usize,
+    overlap: usize,
+}
+
+impl<'a> Iterator for ChunkIter<'a> {
+    type Item = Chunk;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn word_boundry(x: u8) -> bool {
+            x == 32 || x == 10 || x == 9
+        }
+        let mut ntok = 0;
+        let mut overlap = 0;
+        let mut pos = self.pos;
+        loop {
+            if pos >= self.data.len() {
+                if pos == self.pos {
+                    break None
+                } else {
+                    let start = self.pos;
+                    self.pos = pos;
+                    break Some(Chunk {
+                        id: self.id,
+                        start,
+                        end: pos,
+                    })
+                }
+            }
+            if ntok == self.tokens - self.overlap {
+                overlap = pos;
+            }
+            if ntok >= self.tokens {
+                let start = self.pos;
+                self.pos = overlap;
+                break Some(Chunk {
+                    id: self.id,
+                    start,
+                    end: pos,
+                })
+            }
+            while pos < self.data.len() && !word_boundry(self.data[pos]) {
+                pos += 1
+            }
+            ntok += 1
+        }
+    }
+}
+
+pub struct Doc {
+    path: PathBuf,
+    id: DocId,
+    map: Option<MappedDoc>,
+}
+
+impl Doc {
+    pub fn new<S: AsRef<Path>>(path: S) -> Self {
+        Self {
+            path: PathBuf::from(path.as_ref()),
+            id: DocId::new(),
+            map: None,
+        }
+    }
+
+    fn map(&mut self) -> Result<&[u8]> {
+        if self.map.is_none() {
+            let file = File::open(&self.path)?;
+            let map = unsafe { Mmap::map(&file)? };
+            self.map = Some(MappedDoc { file, map });
+        }
+        Ok(&*self.map.as_ref().unwrap().map)
+    }
+
+    fn unmap(&mut self) {
+        self.map = None;
+    }
+
+    pub fn chunks<'a>(&'a mut self, tokens: usize, overlap: usize) -> Result<ChunkIter<'a>> {
+        let data = self.map()?;
+        Ok(ChunkIter {
+            data,
+            pos: 0,
+            tokens,
+            overlap,
+        })
+    }
+}
+
+pub struct DocCache {}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Chunk {
+    id: DocId,
+    start: usize,
+    end: usize,
+}
+
+impl Chunk {}
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?

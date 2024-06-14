@@ -21,3 +21,7 @@ tokenizers = "0.19"
 ndarray = "0.15"
 usearch = { version = "2.12.0", features = ["fp16lib"] }
 half = { version = "2.4.1", features = ["num-traits"] }
+memmap2 = "0.9.4"
+serde = "1"
+serde_derive = "1"
+serde_json = "1"

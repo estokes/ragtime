@@ -32,7 +32,7 @@ pub struct ChunkIter<'a> {
     id: DocId,
     data: &'a [u8],
     pos: usize,
-    tokens: usize,
+    chunk_size: usize,
     overlap: usize,
 }
 
@@ -49,28 +49,28 @@ impl<'a> Iterator for ChunkIter<'a> {
         loop {
             if pos >= self.data.len() {
                 if pos == self.pos {
-                    break None
+                    break None;
                 } else {
                     let start = self.pos;
-                    self.pos = pos;
+                    self.pos = self.data.len();
                     break Some(Chunk {
                         id: self.id,
                         start,
-                        end: pos,
-                    })
+                        end: self.data.len() - 1,
+                    });
                 }
             }
-            if ntok == self.tokens - self.overlap {
+            if ntok == self.chunk_size - self.overlap {
                 overlap = pos;
             }
-            if ntok >= self.tokens {
+            if ntok >= self.chunk_size {
                 let start = self.pos;
                 self.pos = overlap;
                 break Some(Chunk {
                     id: self.id,
                     start,
                     end: pos,
-                })
+                });
             }
             while pos < self.data.len() && !word_boundry(self.data[pos]) {
                 pos += 1
@@ -108,12 +108,23 @@ impl Doc {
         self.map = None;
     }
 
-    pub fn chunks<'a>(&'a mut self, tokens: usize, overlap: usize) -> Result<ChunkIter<'a>> {
+    /// Return an iterator over the chunks in this
+    /// document. [chunk_size] is the number of words that should be
+    /// in a chunk, and [overlap] is the number of words of overlap
+    /// that should exist between chunks. e.g. 512 and 256 would
+    /// produce 512 word chunks that overlap with each other by 256
+    /// words.
+    pub fn chunks<'a>(&'a mut self, chunk_size: usize, overlap: usize) -> Result<ChunkIter<'a>> {
+        let id = self.id;
         let data = self.map()?;
+        if chunk_size == 0 || overlap >= chunk_size {
+            bail!("chunk_size must be > 0, overlap must be < tokens")
+        }
         Ok(ChunkIter {
             data,
+            id,
             pos: 0,
-            tokens,
+            chunk_size,
             overlap,
         })
     }

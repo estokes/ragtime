@@ -1,20 +1,11 @@
-mod doc;
-
 use anyhow::{anyhow, bail, Result};
-use fxhash::FxHashMap;
-use memmap2::Mmap;
 use ndarray::{array, concatenate, s, Array1, Array2, Array4, ArrayBase, Axis, Dim, ViewRepr};
 use ort::{inputs, DynValue, Session, SessionInputValue, SessionOutputs};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs::File,
-    path::{Path, PathBuf},
-    thread::available_parallelism,
-};
+use std::{collections::HashMap, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
-use chrono::prelude::*;
+
+pub mod doc;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?

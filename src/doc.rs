@@ -1,12 +1,12 @@
 /// Document handling
 use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
-use fxhash::{FxBuildHasher, FxHashMap, FxHashSet};
+use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::IndexMap;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fs::File,
     path::{Path, PathBuf},
 };
@@ -94,7 +94,7 @@ impl<'a> Iterator for ChunkIter<'a> {
 struct Doc {
     path: PathBuf,
     id: DocId,
-    file: File,
+    _file: File,
     map: Mmap,
     last_used: DateTime<Utc>,
 }
@@ -106,7 +106,7 @@ impl Doc {
         Ok(Self {
             path,
             id,
-            file,
+            _file: file,
             map,
             last_used: Utc::now(),
         })
@@ -207,7 +207,8 @@ impl DocStore {
             },
         }
         if self.mapped.len() > self.max_mapped {
-            self.mapped.sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
+            self.mapped
+                .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
             while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
                 let (id, doc) = self.mapped.pop().unwrap();
                 self.unmapped.insert(id, doc.path);

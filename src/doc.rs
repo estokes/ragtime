@@ -134,7 +134,7 @@ impl Doc {
 
     fn get<'a>(&'a self, chunk: &Chunk) -> Result<&'a str> {
         let data = &*self.map;
-        let res = std::str::from_utf8(&data[chunk.start..=chunk.end])?;
+        let res = std::str::from_utf8(&data[chunk.start..chunk.end])?;
         Ok(res)
     }
 }

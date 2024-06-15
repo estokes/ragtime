@@ -75,6 +75,9 @@ impl<'a> Iterator for ChunkIter<'a> {
             while pos < self.data.len() && !word_boundry(self.data[pos]) {
                 pos += 1
             }
+            while pos < self.data.len() && word_boundry(self.data[pos]) {
+                pos += 1;
+            }
             ntok += 1
         }
     }

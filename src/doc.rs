@@ -23,7 +23,7 @@ impl DocId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ChunkId(u64);
+pub struct ChunkId(pub u64);
 
 impl ChunkId {
     pub fn new() -> Self {

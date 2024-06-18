@@ -15,6 +15,9 @@ name = "test-encode"
 [[bin]]
 name = "test-chunk"
 
+[[bin]]
+name = "test-gen"
+
 [dependencies]
 #ort = "2.0.0-rc.2"
 ort = { git = "https://github.com/pykeio/ort.git" }

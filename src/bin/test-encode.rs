@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ragtime::{db::EmbedDb, doc::ChunkId, qa::QaModel};
+use ragtime::{db::EmbedDb, doc::ChunkId};
 
 fn test_encode() -> Result<()> {
     const BASE: &str = "/home/eric/proj/bge-m3/onnx";
@@ -12,25 +12,13 @@ fn test_encode() -> Result<()> {
     edb.add(vec![
         (ChunkId::new(), "I've got a lovely bunch of coconuts".into()),
         (ChunkId::new(), "I like coconuts very much".into()),
-        (ChunkId::new(), "A goomba is a character from super mario bros".into()),
+        (
+            ChunkId::new(),
+            "A goomba is a character from super mario bros".into(),
+        ),
     ])?;
     let m = edb.search("who here likes coconuts?".into(), 3)?;
     println!("{m:?}");
-    Ok(())
-}
-
-fn test_gen() -> Result<()> {
-    const BASE: &str =
-        "/home/eric/proj/Phi-3-mini-128k-instruct-onnx/cpu_and_mobile/cpu-int4-rtn-block-32";
-    let gen = QaModel::new(
-        &format!("{BASE}/phi3-mini-128k-instruct-cpu-int4-rtn-block-32.onnx"),
-        &format!("{BASE}/tokenizer.json"),
-    )?;
-    let a = gen.ask(
-        "<|user|>what color is the moon? <|end|>\n<|assistant|>",
-        1000,
-    )?;
-    println!("{a}");
     Ok(())
 }
 

@@ -105,7 +105,7 @@ impl RagQa {
         Ok(Prompt(prompt))
     }
 
-    pub fn ask<S: AsRef<str>>(&self, prompt: &Prompt, gen_max: usize) -> Result<String> {
+    pub fn ask(&self, prompt: &Prompt, gen_max: usize) -> Result<String> {
         self.qa.ask(&prompt.0, gen_max)
     }
 }

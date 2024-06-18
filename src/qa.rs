@@ -95,6 +95,12 @@ impl QaModel {
                 // end of text
                 break;
             }
+            print!(
+                "{}",
+                self.tokenizer
+                    .decode(&[token as u32], false)
+                    .map_err(|e| anyhow!("{e:?}"))?
+            );
             tokens = concatenate![Axis(0), tokens, array![token as i64]];
             attn_mask = concatenate![Axis(0), attn_mask, array![1 as i64]];
         }

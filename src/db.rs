@@ -1,6 +1,5 @@
 use crate::{doc::ChunkId, session_from_model_file};
 use anyhow::{anyhow, bail, Result};
-use memmap2::Mmap;
 use ndarray::{s, Array2, Axis};
 use ort::{inputs, Session, SessionOutputs};
 use serde::{Deserialize, Serialize};

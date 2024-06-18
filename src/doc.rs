@@ -5,6 +5,8 @@ use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::IndexMap;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::HashMap,
     fs::File,
@@ -14,22 +16,22 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DocId(u64);
 
+static NEXT_DOCID: AtomicU64 = AtomicU64::new(0);
+
 impl DocId {
     pub fn new() -> Self {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+        Self(NEXT_DOCID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ChunkId(pub u64);
 
+static NEXT_CHUNKID: AtomicU64 = AtomicU64::new(0);
+
 impl ChunkId {
     pub fn new() -> Self {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+        Self(NEXT_CHUNKID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
@@ -139,12 +141,21 @@ impl Doc {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Chunk {
     id: ChunkId,
     doc: DocId,
     start: usize,
     end: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Saved {
+    docs: Vec<(DocId, PathBuf)>,
+    chunks: Vec<Chunk>,
+    next_docid: u64,
+    next_chunkid: u64,
+    max_mapped: usize,
 }
 
 #[derive(Debug)]
@@ -165,6 +176,42 @@ impl DocStore {
             chunks: HashMap::default(),
             max_mapped,
         }
+    }
+
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let mut fd = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(path.as_ref())?;
+        let next_docid = NEXT_DOCID.load(Ordering::Relaxed);
+        let next_chunkid = NEXT_CHUNKID.load(Ordering::Relaxed);
+        let docs = self
+            .by_path
+            .iter()
+            .map(|(p, id)| (*id, p.clone()))
+            .collect();
+        let chunks = self.chunks.iter().map(|(_, c)| *c).collect();
+        let saved = Saved {
+            docs,
+            chunks,
+            next_chunkid,
+            next_docid,
+            max_mapped: self.max_mapped,
+        };
+        Ok(serde_json::to_writer_pretty(&mut fd, &saved)?)
+    }
+
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
+        let mut t = Self::new(saved.max_mapped);
+        for (id, path) in saved.docs {
+            t.unmapped.insert(id, path.clone());
+            t.by_path.insert(path, id);
+        }
+        for chunk in saved.chunks {
+            t.chunks.insert(chunk.id, chunk);
+        }
+        Ok(t)
     }
 
     pub fn add_document<'a, S: AsRef<Path>>(
@@ -190,7 +237,7 @@ impl DocStore {
         }))
     }
 
-    pub fn load(&mut self, id: u64) -> Result<Chunk> {
+    pub fn get_chunk(&mut self, id: u64) -> Result<Chunk> {
         let chunk = *self
             .chunks
             .get(&ChunkId(id))

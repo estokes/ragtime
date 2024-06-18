@@ -41,7 +41,7 @@ impl QaModel {
         Ok(serde_json::to_writer_pretty(&mut fd, &self.params)?)
     }
 
-    pub fn load<P: AsRef<Path>>(&self, path: P) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let params: Saved = serde_json::from_reader(File::open(path)?)?;
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         Ok(Self {

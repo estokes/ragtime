@@ -211,6 +211,19 @@ impl DocStore {
         for chunk in saved.chunks {
             t.chunks.insert(chunk.id, chunk);
         }
+        macro_rules! update {
+            ($var:ident, $field:ident) => {
+                let _ = $var.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                    if saved.$field > cur {
+                        Some(saved.$field)
+                    } else {
+                        None
+                    }
+                });
+            };
+        }
+        update!(NEXT_DOCID, next_docid);
+        update!(NEXT_CHUNKID, next_chunkid);
         Ok(t)
     }
 

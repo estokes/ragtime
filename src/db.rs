@@ -59,7 +59,7 @@ impl EmbedDb {
         Ok(self.index.save(&*path.to_string_lossy())?)
     }
 
-    pub fn load<P: AsRef<Path>>(&self, path: P, view: bool) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(path: P, view: bool) -> Result<Self> {
         let mut fd = File::open(path.as_ref())?;
         let params: Saved = serde_json::from_reader(&mut fd)?;
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;

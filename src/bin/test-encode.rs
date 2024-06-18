@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ragtime::{EmbedDb, QaModel};
+use ragtime::{db::EmbedDb, doc::ChunkId, qa::QaModel};
 
 fn test_encode() -> Result<()> {
     const BASE: &str = "/home/eric/proj/bge-m3/onnx";
@@ -10,11 +10,11 @@ fn test_encode() -> Result<()> {
         ESIZE,
     )?;
     edb.add(vec![
-        "I've got a lovely bunch of coconuts".into(),
-        "I like coconuts very much".into(),
-        "A goomba is a character from super mario bros".into(),
+        (ChunkId::new(), "I've got a lovely bunch of coconuts".into()),
+        (ChunkId::new(), "I like coconuts very much".into()),
+        (ChunkId::new(), "A goomba is a character from super mario bros".into()),
     ])?;
-    let m = edb.search("who here likes coconuts?".into(), 2)?;
+    let m = edb.search("who here likes coconuts?".into(), 3)?;
     println!("{m:?}");
     Ok(())
 }
@@ -37,5 +37,5 @@ fn test_gen() -> Result<()> {
 pub fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     ort::init().commit()?;
-    test_gen()
+    test_encode()
 }

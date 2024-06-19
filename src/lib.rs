@@ -1,4 +1,4 @@
-use crate::{db::EmbedDb, doc::DocStore, qa::QaModel};
+use crate::{db::EmbedDb, doc::DocStore, qa_onnx::QaModel};
 use anyhow::{anyhow, bail, Result};
 use ort::Session;
 use std::{fs, path::Path, thread::available_parallelism, cmp::min};
@@ -6,7 +6,8 @@ use tokenizers::Tokenizer;
 
 pub mod db;
 pub mod doc;
-pub mod qa;
+pub mod qa_onnx;
+pub mod qa_llama;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?

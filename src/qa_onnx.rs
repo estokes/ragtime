@@ -4,9 +4,7 @@ use ndarray::{array, concatenate, s, Array1, Array4, ArrayBase, Axis, Dim, ViewR
 use ort::{DynValue, Session, SessionInputValue};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
-    fs::{File, OpenOptions},
-    path::{Path, PathBuf},
+    collections::HashMap, fs::{File, OpenOptions}, io::{stdout, Write}, path::{Path, PathBuf}
 };
 use tokenizers::Tokenizer;
 
@@ -101,6 +99,7 @@ impl QaModel {
                     .decode(&[token as u32], false)
                     .map_err(|e| anyhow!("{e:?}"))?
             );
+            stdout().flush()?;
             tokens = concatenate![Axis(0), tokens, array![token as i64]];
             attn_mask = concatenate![Axis(0), attn_mask, array![1 as i64]];
         }

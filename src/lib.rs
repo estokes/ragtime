@@ -1,4 +1,4 @@
-use crate::{db::EmbedDb, doc::DocStore, qa_onnx::QaModel};
+use crate::{db::EmbedDb, doc::DocStore, qa_llama::QaModel};
 use anyhow::{anyhow, bail, Result};
 use ort::Session;
 use std::{fs, path::Path, thread::available_parallelism, cmp::min};
@@ -34,11 +34,10 @@ impl RagQa {
         embed_tokenizer: P,
         embed_dims: usize,
         qa_model: P,
-        qa_tokenizer: P,
     ) -> Result<Self> {
         let docs = DocStore::new(max_mapped);
         let db = EmbedDb::new(embed_model, embed_tokenizer, embed_dims)?;
-        let qa = QaModel::new(qa_model, qa_tokenizer)?;
+        let qa = QaModel::new(qa_model)?;
         Ok(Self { docs, db, qa })
     }
 
@@ -106,7 +105,7 @@ impl RagQa {
         Ok(Prompt(prompt))
     }
 
-    pub fn ask(&self, prompt: &Prompt, gen_max: usize) -> Result<String> {
+    pub fn ask(&mut self, prompt: &Prompt, gen_max: usize) -> Result<String> {
         self.qa.ask(&prompt.0, gen_max)
     }
 }

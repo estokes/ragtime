@@ -5,7 +5,7 @@ use ragtime::RagQa;
 
 const EMB_BASE: &str = "/home/eric/proj/bge-m3/onnx";
 const QA_BASE: &str =
-    "/home/eric/proj/Phi-3-mini-128k-instruct-onnx/cpu_and_mobile/cpu-int4-rtn-block-32";
+    "/home/eric/proj/Phi-3-mini-128k-instruct";
 
 pub fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -15,8 +15,7 @@ pub fn main() -> Result<()> {
         format!("{EMB_BASE}/model.onnx"),
         format!("{EMB_BASE}/tokenizer.json"),
         1024,
-        format!("{QA_BASE}/phi3-mini-128k-instruct-cpu-int4-rtn-block-32.onnx"),
-        format!("{QA_BASE}/tokenizer.json"),
+        format!("{QA_BASE}/ggml-model-q8_0.gguf"),
     )?;
     qa.add_document("/home/eric/Downloads/Fowl Engine.txt", 256, 128)?;
     let mut line = String::new();

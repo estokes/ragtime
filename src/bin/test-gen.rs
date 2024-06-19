@@ -1,14 +1,10 @@
 use anyhow::Result;
-use ragtime::qa::QaModel;
+use ragtime::qa_llama::QaModel;
 use std::io::{stdin, BufRead, BufReader};
 
 fn test_gen(q: &str) -> Result<()> {
-    const BASE: &str =
-        "/home/eric/proj/Phi-3-mini-128k-instruct-onnx/cpu_and_mobile/cpu-int4-rtn-block-32";
-    let gen = QaModel::new(
-        &format!("{BASE}/phi3-mini-128k-instruct-cpu-int4-rtn-block-32.onnx"),
-        &format!("{BASE}/tokenizer.json"),
-    )?;
+    const BASE: &str = "/home/eric/proj/Phi-3-mini-128k-instruct";
+    let gen = QaModel::new(&format!("{BASE}/ggml-model-q8_0.gguf"))?;
     let a = gen.ask(&format!("<|user|>{q} <|end|>\n<|assistant|>"), 1000)?;
     println!("{a}");
     Ok(())

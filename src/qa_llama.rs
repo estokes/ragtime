@@ -9,6 +9,7 @@ use llama_cpp_2::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
+    io::Write,
     num::NonZeroU32,
     path::{Path, PathBuf},
     thread::available_parallelism,
@@ -59,7 +60,7 @@ impl QaModel {
 
     pub fn ask(&self, question: &str, gen: usize) -> Result<String> {
         let n_par = available_parallelism()?.get() as u32;
-        let n_ctx = self.model.n_ctx_train();
+        let n_ctx = self.model.n_ctx_train() / 4;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
                 NonZeroU32::new(n_ctx).ok_or_else(|| anyhow!("trained context size is zero"))?,
@@ -76,22 +77,22 @@ impl QaModel {
         ctx.decode(&mut batch)?;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut answer = String::with_capacity(gen * 64);
-        let mut candidates = LlamaTokenDataArray::new(vec![], false);
         for i in (last_idx + 1)..(last_idx + 1 + gen as i32) {
             if i as u32 > n_ctx {
                 break;
             }
-            candidates.data.clear();
-            candidates
-                .data
-                .extend(ctx.candidates_ith(batch.n_tokens() - 1));
+            let mut candidates =
+                LlamaTokenDataArray::from_iter(ctx.candidates_ith(batch.n_tokens() - 1), false);
             ctx.sample_token_softmax(&mut candidates);
             let token = candidates.data[0].id();
-            if token == self.model.token_eos() {
+            if token == self.model.token_eos() || token.0 == 32007 {
                 break;
             }
             let unicode = self.model.token_to_bytes(token, Special::Tokenize)?;
+            let pos = answer.len();
             let _ = decoder.decode_to_string(&unicode, &mut answer, false);
+            print!("{}", &answer[pos..]);
+            std::io::stdout().flush()?;
             batch.clear();
             batch.add(token, i, &[0], true)?;
             ctx.decode(&mut batch)?;

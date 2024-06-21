@@ -1,13 +1,13 @@
 use crate::{db::EmbedDb, doc::DocStore, qa_llama::QaModel};
 use anyhow::{anyhow, bail, Result};
 use ort::Session;
-use std::{fs, path::Path, thread::available_parallelism, cmp::min};
+use std::{cmp::min, fs, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 
 pub mod db;
 pub mod doc;
-pub mod qa_onnx;
 pub mod qa_llama;
+pub mod qa_onnx;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -17,9 +17,6 @@ fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Se
     let tokenizer = Tokenizer::from_file(tokenizer).map_err(|e| anyhow!("{e:?}"))?;
     Ok((session, tokenizer))
 }
-
-#[derive(Debug, Clone)]
-pub struct Prompt(String);
 
 pub struct RagQa {
     docs: DocStore,
@@ -83,29 +80,56 @@ impl RagQa {
         self.db.add(chunks)
     }
 
-    pub fn encode_prompt<S: AsRef<str>>(&mut self, q: S) -> Result<Prompt> {
+    pub fn encode_prompt<S: AsRef<str>>(
+        &mut self,
+        context: &mut String,
+        rag: Option<S>,
+        q: S,
+    ) -> Result<String> {
         use std::fmt::Write;
         let q = q.as_ref();
-        let matches = self.db.search(q, 3)?;
         let mut prompt = String::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
-        if matches.distances.len() == 0 || matches.distances[0] > 0.7 {
-            write!(prompt, "<|system|>There was no relevant information available about this question<|end|>\n")?;
-        } else {
-            write!(prompt, "<|system|>Context found in the database about this question\n")?;
-            for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
-                if *dist <= 0.7 {
-                    let chunk = self.docs.get_chunk(*id)?;
-                    let s = self.docs.get(&chunk)?;
-                    write!(prompt, "{s}\n\n")?;
-                }
+        write!(prompt, "<|system|>RAG is available if you have questions. If you want to search using RAG, say <RAG>your question</RAG> End your text there, and the system will search the database for your question. The answer to your question will be given using additional <|system|>prompts. Only answer the user's question once you have the information you need, multiple RAG queries may be required. If there isn't any relevant information available the database will tell you. <|end|>\n")?;
+        write!(prompt, "{context}\n")?;
+        if let Some(rag) = rag {
+            let rag = rag.as_ref();
+            let matches = self.db.search(rag, 3)?;
+            for dst in [&mut prompt, context] {
+                if matches.distances.len() == 0 || matches.distances[0] > 0.7 {
+                    write!(dst, "<|system|>There was no relevant information available about \"{rag}\" in the database<|end|>\n")?;
+                } else {
+                    write!(dst, "<|system|>")?;
+                    for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
+                        if *dist <= 0.7 {
+                            let chunk = self.docs.get_chunk(*id)?;
+                            let s = self.docs.get(&chunk)?;
+                            write!(dst, "{s}\n\n")?;
+                        }
+                    }
+                    write!(dst, " <|end|>\n")?;
+                };
             }
-            write!(prompt, " <|end|>\n")?;
-        };
+        }
         write!(prompt, "<|user|>{q} <|end|><|assistant|>")?;
-        Ok(Prompt(prompt))
+        Ok(prompt)
     }
 
-    pub fn ask(&mut self, prompt: &Prompt, gen_max: usize) -> Result<String> {
-        self.qa.ask(&prompt.0, gen_max)
+    pub fn ask<S: AsRef<str>>(&mut self, q: S, gen_max: usize) -> Result<String> {
+        let mut context = String::new();
+        let mut prompt = self.encode_prompt(&mut context, None, q.as_ref())?;
+        loop {
+            let res = self.qa.ask(&prompt, gen_max)?;
+            match res
+                .trim()
+                .strip_prefix("<RAG>")
+                .and_then(|s| s.strip_suffix("</RAG>"))
+            {
+                None => break Ok(res),
+                Some(rag) => {
+                    prompt = self.encode_prompt(&mut context, Some(rag), q.as_ref())?;
+                    dbg!(&prompt);
+                }
+            }
+        }
     }
 }

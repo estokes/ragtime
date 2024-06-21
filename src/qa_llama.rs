@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use chrono::prelude::*;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
@@ -33,6 +34,7 @@ impl QaModel {
         };
         let backend = LlamaBackend::init()?;
         let model_params = LlamaModelParams::default();
+        let model_params = model_params.with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&backend, model.as_ref(), &model_params)?;
         Ok(Self {
             params,
@@ -59,8 +61,9 @@ impl QaModel {
     }
 
     pub fn ask(&self, question: &str, gen: usize) -> Result<String> {
+        let now = Utc::now();
         let n_par = available_parallelism()?.get() as u32;
-        let n_ctx = self.model.n_ctx_train() / 4;
+        let n_ctx = self.model.n_ctx_train() / 8;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
                 NonZeroU32::new(n_ctx).ok_or_else(|| anyhow!("trained context size is zero"))?,
@@ -78,6 +81,10 @@ impl QaModel {
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut answer = String::with_capacity(gen * 64);
         for i in (last_idx + 1)..(last_idx + 1 + gen as i32) {
+            if i == last_idx + 1 {
+                let elapsed = (Utc::now() - now).num_milliseconds();
+                println!("time to first token: {elapsed}ms");
+            }
             if i as u32 > n_ctx {
                 break;
             }

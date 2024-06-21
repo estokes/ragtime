@@ -15,7 +15,7 @@ pub fn main() -> Result<()> {
         format!("{EMB_BASE}/model.onnx"),
         format!("{EMB_BASE}/tokenizer.json"),
         1024,
-        format!("{QA_BASE}/ggml-model-q8_0.gguf"),
+        format!("{QA_BASE}/ggml-model-q4_0.gguf"),
     )?;
     qa.add_document("/home/eric/Downloads/Fowl Engine.txt", 256, 128)?;
     let mut line = String::new();
@@ -23,8 +23,6 @@ pub fn main() -> Result<()> {
     loop {
         line.clear();
         stdin.read_line(&mut line)?;
-        let prompt = qa.encode_prompt(&line)?;
-        dbg!(&prompt);
-        println!("{}", qa.ask(&prompt, 1000)?);
+        println!("{}", qa.ask(&line, 1000)?);
     }
 }

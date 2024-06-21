@@ -5,7 +5,7 @@ use std::io::{stdin, BufRead, BufReader};
 fn test_gen(q: &str) -> Result<()> {
     const BASE: &str = "/home/eric/proj/Phi-3-mini-128k-instruct";
     let gen = QaModel::new(&format!("{BASE}/ggml-model-q8_0.gguf"))?;
-    let a = gen.ask(&format!("<|user|>{q} <|end|>\n<|assistant|>"), 1000)?;
+    let a = gen.ask(q, 1000)?;
     println!("{a}");
     Ok(())
 }

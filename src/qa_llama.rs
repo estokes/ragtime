@@ -13,6 +13,7 @@ use std::{
     io::Write,
     num::NonZeroU32,
     path::{Path, PathBuf},
+    sync::Arc,
     thread::available_parallelism,
 };
 
@@ -23,18 +24,16 @@ struct Saved {
 
 pub struct QaModel {
     params: Saved,
-    backend: LlamaBackend,
+    backend: Arc<LlamaBackend>,
     model: LlamaModel,
 }
 
 impl QaModel {
-    pub fn new<T: AsRef<Path>>(model: T) -> Result<Self> {
+    pub fn new<T: AsRef<Path>>(backend: Arc<LlamaBackend>, model: T) -> Result<Self> {
         let params = Saved {
             model: PathBuf::from(model.as_ref()),
         };
-        let backend = LlamaBackend::init()?;
-        let model_params = LlamaModelParams::default();
-        let model_params = model_params.with_n_gpu_layers(1000);
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&backend, model.as_ref(), &model_params)?;
         Ok(Self {
             params,
@@ -48,10 +47,9 @@ impl QaModel {
         Ok(serde_json::to_writer_pretty(&mut fd, &self.params)?)
     }
 
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(backend: Arc<LlamaBackend>, path: P) -> Result<Self> {
         let params: Saved = serde_json::from_reader(File::open(path)?)?;
-        let backend = LlamaBackend::init()?;
-        let model_params = LlamaModelParams::default();
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&backend, &params.model, &model_params)?;
         Ok(Self {
             params,
@@ -62,17 +60,18 @@ impl QaModel {
 
     pub fn ask(&self, question: &str, gen: usize) -> Result<String> {
         let now = Utc::now();
-        let n_par = available_parallelism()?.get() as u32;
+        let n_par = 16; //available_parallelism()?.get() as u32;
         let n_ctx = self.model.n_ctx_train() / 8;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
                 NonZeroU32::new(n_ctx).ok_or_else(|| anyhow!("trained context size is zero"))?,
             ))
             .with_n_threads(n_par)
-            .with_n_threads_batch(n_par);
+            .with_n_threads_batch(n_par)
+            .with_n_batch(n_ctx);
         let mut ctx = self.model.new_context(&self.backend, ctx_params)?;
         let tokens = self.model.str_to_token(question, AddBos::Always)?;
-        let mut batch = LlamaBatch::new(self.model.n_ctx_train() as usize, 1);
+        let mut batch = LlamaBatch::new(n_ctx as usize, 1);
         let last_idx: i32 = (tokens.len() - 1) as i32;
         for (i, token) in (0i32..).zip(tokens.into_iter()) {
             batch.add(token, i, &[0], i == last_idx)?;

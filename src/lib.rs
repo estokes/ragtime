@@ -136,18 +136,20 @@ where
         use std::fmt::Write;
         let mut prompt = Q::Prompt::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
         let matches = self.db.search(q, 3)?;
-        let mut dst = prompt.system();
-        if matches.distances.len() == 0 || matches.distances[0] > 0.7 {
-            write!(
-                dst,
-                "There was no relevant information available about \"{q}\" in the database\n"
-            )?;
-        } else {
-            for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
-                if *dist <= 0.7 {
-                    let chunk = self.docs.get_chunk(*id)?;
-                    let s = self.docs.get(&chunk)?;
-                    write!(dst, "{s}\n\n")?;
+        {
+            let mut dst = prompt.system();
+            if matches.distances.len() == 0 || matches.distances[0] > 0.7 {
+                write!(
+                    dst,
+                    "There was no relevant information available about \"{q}\" in the database\n"
+                )?;
+            } else {
+                for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
+                    if *dist <= 0.7 {
+                        let chunk = self.docs.get_chunk(*id)?;
+                        let s = self.docs.get(&chunk)?;
+                        write!(dst, "{s}\n\n")?;
+                    }
                 }
             }
         }

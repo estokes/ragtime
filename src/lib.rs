@@ -6,9 +6,9 @@ use std::{cmp::min, fs, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
+pub mod bge_m3;
 pub mod doc;
 pub mod phi3;
-pub mod bge_m3;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -35,10 +35,13 @@ pub trait EmbedModel: Sized {
 }
 
 pub trait QaPrompt {
+    type FinalPrompt;
+
+    fn new() -> Self;
     fn with_capacity(n: usize) -> Self;
     fn system<'a>(&'a mut self) -> impl std::fmt::Write + 'a;
     fn user<'a>(&'a mut self) -> impl std::fmt::Write + 'a;
-    fn finalize(&mut self);
+    fn finalize(self) -> Result<Self::FinalPrompt>;
     fn clear(&mut self);
 }
 
@@ -49,7 +52,7 @@ pub trait QaModel: Sized {
     fn new(args: Self::Args) -> Result<Self>;
     fn ask<'a>(
         &'a mut self,
-        q: Self::Prompt,
+        q: <Self::Prompt as QaPrompt>::FinalPrompt,
         gen_max: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>> + 'a>;
 }
@@ -105,11 +108,7 @@ where
     E: EmbedModel,
     Q: QaModel,
 {
-    pub fn new<P: AsRef<Path>>(
-        max_mapped: usize,
-        embed_args: E::Args,
-        qa_args: Q::Args,
-    ) -> Result<Self> {
+    pub fn new(max_mapped: usize, embed_args: E::Args, qa_args: Q::Args) -> Result<Self> {
         let docs = DocStore::new(max_mapped);
         let db = E::new(embed_args)?;
         let qa = Q::new(qa_args)?;
@@ -132,7 +131,7 @@ where
         Ok(())
     }
 
-    fn encode_prompt(&mut self, q: &str) -> Result<Q::Prompt> {
+    fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as QaPrompt>::FinalPrompt> {
         use std::fmt::Write;
         let mut prompt = Q::Prompt::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
         let matches = self.db.search(q, 3)?;
@@ -154,8 +153,7 @@ where
             }
         }
         write!(prompt.user(), "{q}")?;
-        prompt.finalize();
-        Ok(prompt)
+        Ok(prompt.finalize()?)
     }
 
     pub fn ask<'a, S: AsRef<str>>(
@@ -167,3 +165,5 @@ where
         self.qa.ask(prompt, gen_max)
     }
 }
+
+pub type RagQaPhi3BgeM3 = RagQa<bge_m3::BgeM3, phi3::llama::Phi3>;

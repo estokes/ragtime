@@ -11,6 +11,8 @@ use std::{
 };
 use tokenizers::Tokenizer;
 
+use super::prompt::Phi3FinalPrompt;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Saved {
     pub model: PathBuf,
@@ -106,7 +108,7 @@ impl QaModel for Phi3 {
 
     fn ask(
         &mut self,
-        question: Phi3Prompt,
+        question: Phi3FinalPrompt,
         gen: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>>> {
         let encoded = self

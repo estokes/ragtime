@@ -1,14 +1,32 @@
 use anyhow::Result;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::qa_llama::QaModel;
-use std::{io::{stdin, BufRead, BufReader}, sync::Arc};
+use ragtime::{
+    phi3::{
+        llama::{Phi3, Phi3Args},
+        prompt::Phi3Prompt,
+    },
+    QaModel, QaPrompt,
+};
+use std::{
+    io::{stdin, stdout, BufRead, BufReader, Write},
+    path::PathBuf,
+    sync::Arc,
+};
 
 fn test_gen(q: &str) -> Result<()> {
     const BASE: &str = "/home/eric/proj/Phi-3-mini-128k-instruct";
     let backend = Arc::new(LlamaBackend::init()?);
-    let gen = QaModel::new(backend, &format!("{BASE}/ggml-model-q8_0.gguf"))?;
-    let a = gen.ask(q, 1000)?;
-    println!("{a}");
+    let mut gen = Phi3::new(Phi3Args {
+        backend,
+        model: PathBuf::from(format!("{BASE}/ggml-model-q8_0.gguf")),
+    })?;
+    let mut prompt = Phi3Prompt::new();
+    std::fmt::Write::write_str(&mut prompt.user(), q)?;
+    for tok in gen.ask(prompt.finalize()?, None)? {
+        let tok = tok?;
+        print!("{tok}");
+        stdout().flush()?;
+    }
     Ok(())
 }
 

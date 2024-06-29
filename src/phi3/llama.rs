@@ -1,4 +1,4 @@
-use super::prompt::Phi3Prompt;
+use super::prompt::{Phi3FinalPrompt, Phi3Prompt};
 use crate::{Persistable, QaModel};
 use anyhow::{anyhow, Ok, Result};
 use compact_str::CompactString;
@@ -161,7 +161,7 @@ impl QaModel for Phi3 {
 
     fn ask(
         &mut self,
-        question: Phi3Prompt,
+        question: Phi3FinalPrompt,
         gen: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>>> {
         let tokens = self.0.model.str_to_token(&question.0, AddBos::Always)?;

@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use crate::QaPrompt;
 use std::fmt::Write;
 
@@ -23,9 +25,13 @@ impl<'a> Drop for Writer<'a> {
     }
 }
 
-pub struct Phi3Prompt(pub(super) String);
+pub struct Phi3FinalPrompt(pub(super) String);
+
+pub struct Phi3Prompt(String);
 
 impl QaPrompt for Phi3Prompt {
+    type FinalPrompt = Phi3FinalPrompt;
+
     fn system<'a>(&'a mut self) -> impl std::fmt::Write + 'a {
         write!(self.0, "<|system|>").unwrap();
         Writer(&mut self.0)
@@ -40,11 +46,16 @@ impl QaPrompt for Phi3Prompt {
         Self(String::with_capacity(n))
     }
 
+    fn new() -> Self {
+        Self(String::new())
+    }
+
     fn clear(&mut self) {
         self.0.clear()
     }
 
-    fn finalize(&mut self) {
-        write!(self.0, "<|assistant|>").unwrap()
+    fn finalize(mut self) -> Result<Phi3FinalPrompt> {
+        write!(self.0, "<|assistant|>")?;
+        Ok(Phi3FinalPrompt(self.0))
     }
 }

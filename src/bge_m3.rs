@@ -14,13 +14,13 @@ use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
 const DIMS: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Saved {
+pub struct BgeArgs {
     pub model: PathBuf,
     pub tokenizer: PathBuf,
 }
 
 pub struct BgeM3 {
-    params: Saved,
+    params: BgeArgs,
     session: Session,
     tokenizer: Tokenizer,
     index: Index,
@@ -48,7 +48,7 @@ impl Persistable for BgeM3 {
 
     fn load<P: AsRef<Path>>(_ctx: (), path: P, view: bool) -> Result<Self> {
         let mut fd = File::open(path.as_ref())?;
-        let params: Saved = serde_json::from_reader(&mut fd)?;
+        let params: BgeArgs = serde_json::from_reader(&mut fd)?;
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         let index = Index::new(&options(DIMS))?;
         let mut path = PathBuf::from(path.as_ref());
@@ -69,7 +69,7 @@ impl Persistable for BgeM3 {
 }
 
 impl EmbedModel for BgeM3 {
-    type Args = Saved;
+    type Args = BgeArgs;
 
     fn new(params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;

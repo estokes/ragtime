@@ -17,50 +17,66 @@ use std::{
     thread::available_parallelism,
 };
 
+use crate::{Persistable, QaModel};
+
+use super::prompt::Phi3Prompt;
+
 #[derive(Debug, Serialize, Deserialize)]
-struct Saved {
-    model: PathBuf,
+pub struct Saved {
+    pub model: PathBuf,
 }
 
-pub struct QaModel {
+pub struct Phi3Args {
+    pub model: PathBuf,
+    pub backend: Arc<LlamaBackend>,
+}
+
+pub struct Phi3 {
     params: Saved,
     backend: Arc<LlamaBackend>,
     model: LlamaModel,
 }
 
-impl QaModel {
-    pub fn new<T: AsRef<Path>>(backend: Arc<LlamaBackend>, model: T) -> Result<Self> {
-        let params = Saved {
-            model: PathBuf::from(model.as_ref()),
-        };
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
-        let model = LlamaModel::load_from_file(&backend, model.as_ref(), &model_params)?;
-        Ok(Self {
-            params,
-            backend,
-            model,
-        })
-    }
+impl Persistable for Phi3 {
+    type Ctx = Arc<LlamaBackend>;
 
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
         Ok(serde_json::to_writer_pretty(&mut fd, &self.params)?)
     }
 
-    pub fn load<P: AsRef<Path>>(backend: Arc<LlamaBackend>, path: P) -> Result<Self> {
+    fn load<P: AsRef<Path>>(ctx: Arc<LlamaBackend>, path: P, _view: bool) -> Result<Self> {
         let params: Saved = serde_json::from_reader(File::open(path)?)?;
         let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
-        let model = LlamaModel::load_from_file(&backend, &params.model, &model_params)?;
+        let model = LlamaModel::load_from_file(&ctx, &params.model, &model_params)?;
         Ok(Self {
             params,
-            backend,
+            backend: ctx,
+            model,
+        })
+    }
+}
+
+impl QaModel for Phi3 {
+    type Args = Phi3Args;
+    type Prompt = Phi3Prompt;
+ 
+    fn new(args: Self::Args) -> Result<Self> {
+        let params = Saved {
+            model: args.model
+        };
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
+        let model = LlamaModel::load_from_file(&args.backend, &params.model, &model_params)?;
+        Ok(Self {
+            params,
+            backend: args.backend,
             model,
         })
     }
 
-    pub fn ask(&self, question: &str, gen: usize) -> Result<String> {
+    fn ask(&self, question: &str, gen: usize) -> Result<String> {
         let now = Utc::now();
-        let n_par = 16; //available_parallelism()?.get() as u32;
+        let n_par = available_parallelism()?.get() as u32;
         let n_ctx = self.model.n_ctx_train() / 8;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
@@ -106,3 +122,4 @@ impl QaModel {
         Ok(answer)
     }
 }
+

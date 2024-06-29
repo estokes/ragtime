@@ -2,13 +2,13 @@ use crate::doc::{ChunkId, DocStore};
 use anyhow::{anyhow, bail, Result};
 use compact_str::CompactString;
 use ort::Session;
-use std::{cmp::min, fs, path::Path, sync::Arc, thread::available_parallelism};
+use std::{cmp::min, fs, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
 pub mod doc;
-pub mod llama;
-pub mod onnx;
+pub mod phi3;
+pub mod bge_m3;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?

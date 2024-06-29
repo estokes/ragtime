@@ -1,3 +1,4 @@
+/// this is broken at the moment, no model I've been able to find has the proper pooling layers
 use crate::doc::ChunkId;
 use anyhow::{anyhow, bail, Context, Result};
 use llama_cpp_2::{
@@ -9,7 +10,15 @@ use llama_cpp_2::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{File, OpenOptions}, iter, marker::PhantomPinned, num::NonZero, ops::Deref, path::{Path, PathBuf}, pin::Pin, sync::Arc, thread::available_parallelism
+    fs::{File, OpenOptions},
+    iter,
+    marker::PhantomPinned,
+    num::NonZero,
+    ops::Deref,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    thread::available_parallelism,
 };
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -75,15 +84,15 @@ impl EmbedDb {
             _pin: PhantomPinned,
         });
         let n_ctx = t.model.n_ctx_train();
-/*
-        #[cfg(vulkan)]
-        let ctx_params = LlamaContextParams::default()
-            .with_n_threads_batch(32)
-            .with_n_ctx(NonZero::new(n_ctx))
-            .with_n_batch(n_ctx)
-            .with_embeddings(true);
-        #[cfg(not(vulkan))]
-*/
+        /*
+                #[cfg(vulkan)]
+                let ctx_params = LlamaContextParams::default()
+                    .with_n_threads_batch(32)
+                    .with_n_ctx(NonZero::new(n_ctx))
+                    .with_n_batch(n_ctx)
+                    .with_embeddings(true);
+                #[cfg(not(vulkan))]
+        */
         let ctx_params = LlamaContextParams::default()
             .with_n_threads_batch(available_parallelism()?.get() as u32)
             .with_n_ctx(NonZero::new(n_ctx))

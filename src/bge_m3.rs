@@ -1,4 +1,5 @@
-use crate::{doc::ChunkId, session_from_model_file};
+use super::session_from_model_file;
+use crate::{doc::ChunkId, EmbedModel, Persistable};
 use anyhow::{anyhow, bail, Result};
 use ndarray::{s, Array2, Axis};
 use ort::{inputs, Session, SessionOutputs};
@@ -10,14 +11,15 @@ use std::{
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
 
+const DIMS: usize = 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Saved {
-    model: PathBuf,
-    tokenizer: PathBuf,
-    dims: usize,
+pub struct Saved {
+    pub model: PathBuf,
+    pub tokenizer: PathBuf,
 }
 
-pub struct EmbedDb {
+pub struct BgeM3 {
     params: Saved,
     session: Session,
     tokenizer: Tokenizer,
@@ -32,25 +34,10 @@ fn options(dims: usize) -> IndexOptions {
     opts
 }
 
-impl EmbedDb {
-    pub fn new<P: AsRef<Path>>(model: P, tokenizer: P, dims: usize) -> Result<Self> {
-        let params = Saved {
-            model: PathBuf::from(model.as_ref()),
-            tokenizer: PathBuf::from(tokenizer.as_ref()),
-            dims,
-        };
-        let (session, tokenizer) = session_from_model_file(model, tokenizer)?;
-        let index = Index::new(&options(dims))?;
-        index.reserve(1000)?;
-        Ok(Self {
-            params,
-            session,
-            tokenizer,
-            index,
-        })
-    }
+impl Persistable for BgeM3 {
+    type Ctx = ();
 
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut path = PathBuf::from(path.as_ref());
         path.set_extension("json");
         let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
@@ -59,11 +46,11 @@ impl EmbedDb {
         Ok(self.index.save(&*path.to_string_lossy())?)
     }
 
-    pub fn load<P: AsRef<Path>>(path: P, view: bool) -> Result<Self> {
+    fn load<P: AsRef<Path>>(_ctx: (), path: P, view: bool) -> Result<Self> {
         let mut fd = File::open(path.as_ref())?;
         let params: Saved = serde_json::from_reader(&mut fd)?;
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
-        let index = Index::new(&options(params.dims))?;
+        let index = Index::new(&options(DIMS))?;
         let mut path = PathBuf::from(path.as_ref());
         path.set_extension("usearch");
         let path = path.to_string_lossy();
@@ -79,7 +66,50 @@ impl EmbedDb {
             index,
         })
     }
+}
 
+impl EmbedModel for BgeM3 {
+    type Args = Saved;
+
+    fn new(params: Self::Args) -> Result<Self> {
+        let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
+        let index = Index::new(&options(DIMS))?;
+        index.reserve(1000)?;
+        Ok(Self {
+            params,
+            session,
+            tokenizer,
+            index,
+        })
+    }
+
+    fn add(&mut self, text: &[(ChunkId, &str)]) -> Result<()> {
+        let embed = Self::embed(
+            &self.tokenizer,
+            &self.session,
+            text.iter().map(|(_, t)| *t).collect(),
+        )?;
+        let embed = embed["sentence_embedding"].try_extract_tensor::<f32>()?;
+        for (e, (id, _)) in embed.axis_iter(Axis(0)).zip(text.iter()) {
+            let d = e.as_slice().ok_or_else(|| anyhow!("could not get slice"))?;
+            self.index.add(id.0, d)?
+        }
+        Ok(())
+    }
+
+    /// The keys component of Matches is a vec of ChunkIds represented as u64s.
+    fn search(&mut self, text: &str, n: usize) -> Result<Matches> {
+        let qembed = Self::embed(&self.tokenizer, &self.session, vec![text])?;
+        let qembed = qembed["sentence_embedding"].try_extract_tensor::<f32>()?;
+        let qembed = qembed.slice(s![0, ..]);
+        let qembed = qembed
+            .as_slice()
+            .ok_or_else(|| anyhow!("could not get sentence embedding"))?;
+        Ok(self.index.search(qembed, n)?)
+    }
+}
+
+impl BgeM3 {
     fn embed<'a>(
         tokenizer: &Tokenizer,
         session: &'a Session,
@@ -113,30 +143,5 @@ impl EmbedDb {
             }
         });
         Ok(session.run(inputs![input, attention_mask]?)?)
-    }
-
-    pub fn add(&mut self, text: Vec<(ChunkId, &str)>) -> Result<()> {
-        let embed = Self::embed(
-            &self.tokenizer,
-            &self.session,
-            text.iter().map(|(_, t)| *t).collect(),
-        )?;
-        let embed = embed["sentence_embedding"].try_extract_tensor::<f32>()?;
-        for (e, (id, _)) in embed.axis_iter(Axis(0)).zip(text.iter()) {
-            let d = e.as_slice().ok_or_else(|| anyhow!("could not get slice"))?;
-            self.index.add(id.0, d)?
-        }
-        Ok(())
-    }
-
-    /// The keys component of Matches is a vec of ChunkIds represented as u64s.
-    pub fn search(&self, text: &str, n: usize) -> Result<Matches> {
-        let qembed = Self::embed(&self.tokenizer, &self.session, vec![text])?;
-        let qembed = qembed["sentence_embedding"].try_extract_tensor::<f32>()?;
-        let qembed = qembed.slice(s![0, ..]);
-        let qembed = qembed
-            .as_slice()
-            .ok_or_else(|| anyhow!("could not get sentence embedding"))?;
-        Ok(self.index.search(qembed, n)?)
     }
 }

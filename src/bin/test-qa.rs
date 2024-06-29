@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::prelude::*;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::{bge_m3::BgeArgs, phi3::llama::Phi3Args, RagQaPhi3BgeM3};
+use ragtime::{bge_m3::onnx::BgeArgs, phi3::llama::Phi3Args, RagQaPhi3BgeM3};
 use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,

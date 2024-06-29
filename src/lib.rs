@@ -166,4 +166,4 @@ where
     }
 }
 
-pub type RagQaPhi3BgeM3 = RagQa<bge_m3::BgeM3, phi3::llama::Phi3>;
+pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;

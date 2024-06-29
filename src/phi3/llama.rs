@@ -164,6 +164,7 @@ impl QaModel for Phi3 {
         question: Phi3FinalPrompt,
         gen: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>>> {
+        self.0.as_mut().ctx().clear_kv_cache();
         let tokens = self.0.model.str_to_token(&question.0, AddBos::Always)?;
         let mut batch = LlamaBatch::new(self.0.n_ctx as usize, 1);
         let last_idx: i32 = (tokens.len() - 1) as i32;

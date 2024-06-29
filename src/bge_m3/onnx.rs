@@ -1,4 +1,4 @@
-use super::session_from_model_file;
+use crate::session_from_model_file;
 use crate::{doc::ChunkId, EmbedModel, Persistable};
 use anyhow::{anyhow, bail, Result};
 use ndarray::{s, Array2, Axis};

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ragtime::{
-    bge_m3::{BgeArgs, BgeM3},
+    bge_m3::onnx::{BgeArgs, BgeM3},
     doc::ChunkId,
     EmbedModel,
 };

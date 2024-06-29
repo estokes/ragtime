@@ -85,6 +85,7 @@ impl<'a> TokenIter<'a> {
         if self.i as u32 > self.model.0.n_ctx {
             return Ok(None);
         }
+        self.model.0.as_mut().ctx().decode(&mut self.batch)?;
         let candidates = {
             let ctx = self.model.0.as_mut().ctx();
             let mut a = LlamaTokenDataArray::from_iter(
@@ -96,7 +97,7 @@ impl<'a> TokenIter<'a> {
         };
         let token = candidates.data[0].id();
         // CR estokes: abstract this
-        if token == self.model.0.model.token_eos() || token.0 == 32007 {
+        if token == self.model.0.model.token_eos() {
             return Ok(None);
         }
         let unicode = self
@@ -110,7 +111,6 @@ impl<'a> TokenIter<'a> {
             .decode_to_string(&unicode, &mut self.answer, false);
         self.batch.clear();
         self.batch.add(token, self.i, &[0], true)?;
-        self.model.0.as_mut().ctx().decode(&mut self.batch)?;
         self.i += 1;
         Ok(Some(CompactString::from(&self.answer[pos..])))
     }
@@ -164,6 +164,7 @@ impl QaModel for Phi3 {
         question: Phi3FinalPrompt,
         gen: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>>> {
+        let n_ctx = self.0.n_ctx as usize;
         self.0.as_mut().ctx().clear_kv_cache();
         let tokens = self.0.model.str_to_token(&question.0, AddBos::Always)?;
         let mut batch = LlamaBatch::new(self.0.n_ctx as usize, 1);
@@ -171,12 +172,11 @@ impl QaModel for Phi3 {
         for (i, token) in (0i32..).zip(tokens.into_iter()) {
             batch.add(token, i, &[0], i == last_idx)?;
         }
-        self.0.as_mut().ctx().decode(&mut batch)?;
         Ok(TokenIter {
             model: self,
             decoder: encoding_rs::UTF_8.new_decoder(),
             batch,
-            answer: String::with_capacity(gen.unwrap_or(64)),
+            answer: String::with_capacity(gen.unwrap_or(n_ctx) * 32),
             gen,
             i: last_idx + 1,
             question_len: last_idx + 1,

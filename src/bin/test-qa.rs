@@ -27,6 +27,7 @@ pub fn main() -> Result<()> {
         },
     )?;
     qa.add_document("/home/eric/Downloads/Fowl Engine.txt", 256, 128)?;
+    println!("ready");
     let mut line = String::new();
     let mut stdin = BufReader::new(stdin());
     loop {

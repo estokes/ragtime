@@ -121,13 +121,11 @@ where
         chunk_size: usize,
         overlap: usize,
     ) -> Result<()> {
-        println!("adding document {:?}", doc.as_ref());
         let chunks = self
             .docs
             .add_document(doc, chunk_size, overlap)?
             .collect::<Result<Vec<_>>>()?;
         self.db.add(&chunks)?;
-        println!("document added");
         Ok(())
     }
 

@@ -97,7 +97,7 @@ impl<'a> TokenIter<'a> {
         };
         let token = candidates.data[0].id();
         // CR estokes: abstract this
-        if token == self.model.0.model.token_eos() {
+        if token == self.model.0.model.token_eos() || token.0 == 32007 {
             return Ok(None);
         }
         let unicode = self

@@ -24,11 +24,13 @@ use std::{
 pub struct Saved {
     pub model: PathBuf,
     pub threads: u32,
+    pub ctx_divisor: u32,
 }
 
 pub struct Phi3Args {
     pub model: PathBuf,
     pub threads: u32,
+    pub ctx_divisor: u32,
     pub backend: Arc<LlamaBackend>,
 }
 
@@ -62,6 +64,7 @@ impl Persistable for Phi3 {
         Phi3::new(Phi3Args {
             model: params.model,
             threads: params.threads,
+            ctx_divisor: params.ctx_divisor,
             backend: ctx,
         })
     }
@@ -131,10 +134,10 @@ impl QaModel for Phi3 {
     type Prompt = Phi3Prompt;
 
     fn new(args: Self::Args) -> Result<Self> {
-        let params = Saved { model: args.model, threads: args.threads };
+        let params = Saved { model: args.model, threads: args.threads, ctx_divisor: args.ctx_divisor };
         let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&args.backend, &params.model, &model_params)?;
-        let n_ctx = model.n_ctx_train() / 8;
+        let n_ctx = model.n_ctx_train() / args.ctx_divisor;
         let mut t = Phi3(Box::pin(Phi3Inner {
             params,
             ctx: None,

@@ -32,6 +32,12 @@ struct Args {
     overlap_size: usize,
     #[arg(
         long,
+        default_value = "8",
+        help = "the context divisor (trade context for less memory use)"
+    )]
+    ctx_divisor: u32,
+    #[arg(
+        long,
         default_value = "64",
         help = "the maximum number of documents to keep open at once"
     )]
@@ -82,6 +88,7 @@ impl Args {
             Phi3Args {
                 backend,
                 threads,
+                ctx_divisor: self.ctx_divisor,
                 model: qa_model.clone(),
             },
         )?;

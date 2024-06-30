@@ -24,6 +24,12 @@ struct Args {
     threads: Option<u32>,
     #[arg(long, help = "suppress llama.cpp logging")]
     quiet: bool,
+    #[arg(
+        long,
+        default_value = "8",
+        help = "the context divisor (trade context for less memory use)"
+    )]
+    ctx_divisor: u32,
     #[arg(long, help = "the prompt file")]
     prompt_file: Option<PathBuf>,
     #[arg(long, help = "the prompt string")]
@@ -51,6 +57,7 @@ pub fn main() -> Result<()> {
         threads: args
             .threads
             .unwrap_or(available_parallelism()?.get() as u32),
+        ctx_divisor: args.ctx_divisor,
         model: args.model,
     })?;
     let mut prompt = Phi3Prompt::new();

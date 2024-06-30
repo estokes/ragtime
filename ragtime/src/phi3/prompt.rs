@@ -25,8 +25,10 @@ impl<'a> Drop for Writer<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct Phi3FinalPrompt(pub(super) String);
 
+#[derive(Debug)]
 pub struct Phi3Prompt(String);
 
 impl QaPrompt for Phi3Prompt {

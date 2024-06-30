@@ -24,3 +24,4 @@ indexmap = { workspace = true }
 llama-cpp-2 = { workspace = true }
 encoding_rs = { workspace = true }
 compact_str = { workspace = true }
+tracing = { workspace = true }

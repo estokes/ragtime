@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
+use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use ragtime::{
     phi3::{
@@ -8,34 +9,61 @@ use ragtime::{
     QaModel, QaPrompt,
 };
 use std::{
-    io::{stdin, stdout, BufRead, BufReader, Write},
+    io::{stdout, Write},
     path::PathBuf,
     sync::Arc,
     thread::available_parallelism,
 };
 
-fn test_gen(q: &str) -> Result<()> {
-    const BASE: &str = "/home/eric/proj/Phi-3-mini-128k-instruct";
-    let backend = Arc::new(LlamaBackend::init()?);
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(long, help = "path to the model")]
+    model: PathBuf,
+    #[arg(long, help = "the number of threads to use (default: all available)")]
+    threads: Option<u32>,
+    #[arg(long, help = "suppress llama.cpp logging")]
+    quiet: bool,
+    #[arg(long, help = "the prompt file")]
+    prompt_file: Option<PathBuf>,
+    #[arg(long, help = "the prompt string")]
+    prompt: Option<String>,
+}
+
+pub fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+    let args = Args::parse();
+    if args.prompt.is_some() && args.prompt_file.is_some() {
+        bail!("prompt and prompt_file are mutually exclusive");
+    }
+    if args.prompt.is_none() && args.prompt_file.is_none() {
+        bail!("prompt or prompt_file is required");
+    }
+    let backend = Arc::new({
+        let mut be = LlamaBackend::init()?;
+        if args.quiet {
+            be.void_logs();
+        }
+        be
+    });
     let mut gen = Phi3::new(Phi3Args {
         backend,
-        threads: available_parallelism()?.get() as u32,
-        model: PathBuf::from(format!("{BASE}/ggml-model-q8_0.gguf")),
+        threads: args
+            .threads
+            .unwrap_or(available_parallelism()?.get() as u32),
+        model: args.model,
     })?;
     let mut prompt = Phi3Prompt::new();
-    std::fmt::Write::write_str(&mut prompt.user(), q)?;
+    let prompt_str = if let Some(prompt_file) = args.prompt_file {
+        std::fs::read_to_string(prompt_file)?
+    } else {
+        args.prompt.unwrap()
+    };
+    std::fmt::Write::write_str(&mut prompt.user(), &prompt_str)?;
     for tok in gen.ask(prompt.finalize()?, None)? {
         let tok = tok?;
         print!("{tok}");
         stdout().flush()?;
     }
     Ok(())
-}
-
-pub fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-    let mut stdin = BufReader::new(stdin());
-    let mut line = String::new();
-    stdin.read_line(&mut line)?;
-    test_gen(&line)
 }

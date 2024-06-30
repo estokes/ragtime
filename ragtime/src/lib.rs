@@ -2,7 +2,7 @@ use crate::doc::{ChunkId, DocStore};
 use anyhow::{anyhow, bail, Result};
 use compact_str::CompactString;
 use ort::Session;
-use std::{cmp::min, fs, path::Path, thread::available_parallelism};
+use std::{cmp::min, fmt::Debug, fs, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
@@ -35,7 +35,7 @@ pub trait EmbedModel: Sized {
 }
 
 pub trait QaPrompt {
-    type FinalPrompt;
+    type FinalPrompt: Debug;
 
     fn new() -> Self;
     fn with_capacity(n: usize) -> Self;
@@ -160,6 +160,7 @@ where
         gen_max: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>> + 'a> {
         let prompt = self.encode_prompt(q.as_ref())?;
+        tracing::debug!("{:?}", prompt);
         self.qa.ask(prompt, gen_max)
     }
 }

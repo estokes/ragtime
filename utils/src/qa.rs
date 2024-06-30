@@ -43,7 +43,7 @@ struct Args {
 }
 
 impl Args {
-    fn init(&self) -> Result<RagQaPhi3BgeM3> {
+    fn init(&self) -> Result<(bool, RagQaPhi3BgeM3)> {
         tracing_subscriber::fmt::init();
         ort::init().commit()?;
         let backend = Arc::new({
@@ -56,7 +56,7 @@ impl Args {
         if let Some(cp) = &self.checkpoint {
             let view = self.add_document.is_empty();
             if let Ok(qa) = RagQaPhi3BgeM3::load((), Arc::clone(&backend), cp, view) {
-                return Ok(qa);
+                return Ok((view, qa));
             }
         }
         let emb_model = self
@@ -85,18 +85,20 @@ impl Args {
                 model: qa_model.clone(),
             },
         )?;
-        Ok(qa)
+        Ok((false, qa))
     }
 }
 
 pub fn main() -> Result<()> {
     let args = Args::parse();
-    let mut qa = args.init()?;
+    let (view, mut qa) = args.init()?;
     for doc in &args.add_document {
         qa.add_document(doc, args.chunk_size, args.overlap_size)?;
     }
     if let Some(cp) = &args.checkpoint {
-        qa.save(cp)?;
+        if !view {
+            qa.save(cp)?;
+        }
     }
     println!("ready");
     let mut line = String::new();

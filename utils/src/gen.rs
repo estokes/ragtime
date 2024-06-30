@@ -11,6 +11,7 @@ use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
     sync::Arc,
+    thread::available_parallelism,
 };
 
 fn test_gen(q: &str) -> Result<()> {
@@ -18,6 +19,7 @@ fn test_gen(q: &str) -> Result<()> {
     let backend = Arc::new(LlamaBackend::init()?);
     let mut gen = Phi3::new(Phi3Args {
         backend,
+        threads: available_parallelism()?.get() as u32,
         model: PathBuf::from(format!("{BASE}/ggml-model-q8_0.gguf")),
     })?;
     let mut prompt = Phi3Prompt::new();

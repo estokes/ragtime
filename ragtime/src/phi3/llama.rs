@@ -18,16 +18,17 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
-    thread::available_parallelism,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Saved {
     pub model: PathBuf,
+    pub threads: u32,
 }
 
 pub struct Phi3Args {
     pub model: PathBuf,
+    pub threads: u32,
     pub backend: Arc<LlamaBackend>,
 }
 
@@ -60,6 +61,7 @@ impl Persistable for Phi3 {
         let params: Saved = serde_json::from_reader(File::open(path)?)?;
         Phi3::new(Phi3Args {
             model: params.model,
+            threads: params.threads,
             backend: ctx,
         })
     }
@@ -129,7 +131,7 @@ impl QaModel for Phi3 {
     type Prompt = Phi3Prompt;
 
     fn new(args: Self::Args) -> Result<Self> {
-        let params = Saved { model: args.model };
+        let params = Saved { model: args.model, threads: args.threads };
         let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&args.backend, &params.model, &model_params)?;
         let n_ctx = model.n_ctx_train() / 8;
@@ -141,17 +143,12 @@ impl QaModel for Phi3 {
             n_ctx,
             _pin: PhantomPinned,
         }));
-        let n_par = if cfg!(vulkan) {
-            32
-        } else {
-            available_parallelism()?.get() as u32
-        };
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
                 NonZeroU32::new(n_ctx).ok_or_else(|| anyhow!("trained context size is zero"))?,
             ))
-            .with_n_threads(n_par)
-            .with_n_threads_batch(n_par)
+            .with_n_threads(args.threads)
+            .with_n_threads_batch(args.threads)
             .with_n_batch(n_ctx);
         let ctx = unsafe { &*((&t.0.model) as *const LlamaModel) }
             .new_context(&t.0.backend, ctx_params)?;

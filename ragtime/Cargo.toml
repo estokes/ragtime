@@ -1,0 +1,26 @@
+[package]
+name = "ragtime"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+vulkan = ["llama-cpp-2/vulkan"]
+native = ["llama-cpp-2/native"]
+
+[dependencies]
+ort = { workspace = true }
+anyhow = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokenizers = { workspace = true }
+ndarray = { workspace = true }
+usearch = { workspace = true }
+memmap2 = { workspace = true }
+serde = { workspace = true }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+fxhash = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+llama-cpp-2 = { workspace = true }
+encoding_rs = { workspace = true }
+compact_str = { workspace = true }

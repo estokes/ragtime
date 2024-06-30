@@ -13,19 +13,33 @@ use std::{
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
+    #[arg(long, help = "path to the embedding model (onnx)")]
     emb_model: Option<PathBuf>,
+    #[arg(long, help = "path to the embedding tokenizer (e.g. tokenizer.json)")]
     emb_tokenizer: Option<PathBuf>,
+    #[arg(long, help = "path to the QA model (gguf)")]
     qa_model: Option<PathBuf>,
+    #[arg(long, help = "the number of threads to use (default: all available)")]
     threads: Option<u32>,
+    #[arg(
+        long,
+        help = "path to a checkpoint directory (created if it doesn't exist)"
+    )]
     checkpoint: Option<PathBuf>,
-    #[arg(default_value = "256")]
+    #[arg(long, default_value = "256", help = "the size of each chunk in tokens")]
     chunk_size: usize,
-    #[arg(default_value = "128")]
+    #[arg(long, default_value = "128", help = "the chunk overlap size in tokens")]
     overlap_size: usize,
-    #[arg(default_value = "64")]
+    #[arg(
+        long,
+        default_value = "64",
+        help = "the maximum number of documents to keep open at once"
+    )]
     max_mapped: usize,
+    #[arg(long, help = "suppress llama.cpp logging")]
     quiet: bool,
-    add_documents: Vec<PathBuf>,
+    #[arg(long, help = "document to add to the index, may be repeated")]
+    add_document: Vec<PathBuf>,
 }
 
 impl Args {
@@ -40,7 +54,7 @@ impl Args {
             be
         });
         if let Some(cp) = &self.checkpoint {
-            let view = self.add_documents.is_empty();
+            let view = self.add_document.is_empty();
             if let Ok(qa) = RagQaPhi3BgeM3::load((), Arc::clone(&backend), cp, view) {
                 return Ok(qa);
             }
@@ -78,7 +92,7 @@ impl Args {
 pub fn main() -> Result<()> {
     let args = Args::parse();
     let mut qa = args.init()?;
-    for doc in &args.add_documents {
+    for doc in &args.add_document {
         qa.add_document(doc, args.chunk_size, args.overlap_size)?;
     }
     if let Some(cp) = &args.checkpoint {

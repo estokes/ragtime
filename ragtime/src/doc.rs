@@ -1,10 +1,11 @@
 /// Document handling
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Ok, Result};
 use chrono::prelude::*;
 use fxhash::{FxBuildHasher, FxHashMap};
 use indexmap::IndexMap;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
@@ -151,7 +152,7 @@ pub struct Chunk {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Saved {
-    docs: Vec<(DocId, PathBuf)>,
+    docs: Vec<(DocId, PathBuf, String)>,
     chunks: Vec<Chunk>,
     next_docid: u64,
     next_chunkid: u64,
@@ -162,6 +163,7 @@ struct Saved {
 pub struct DocStore {
     mapped: IndexMap<DocId, Doc, FxBuildHasher>,
     unmapped: FxHashMap<DocId, PathBuf>,
+    summary: FxHashMap<DocId, String>,
     by_path: FxHashMap<PathBuf, DocId>,
     chunks: FxHashMap<ChunkId, Chunk>,
     max_mapped: usize,
@@ -172,6 +174,7 @@ impl DocStore {
         Self {
             mapped: IndexMap::default(),
             unmapped: HashMap::default(),
+            summary: HashMap::default(),
             by_path: HashMap::default(),
             chunks: HashMap::default(),
             max_mapped,
@@ -188,7 +191,7 @@ impl DocStore {
         let docs = self
             .by_path
             .iter()
-            .map(|(p, id)| (*id, p.clone()))
+            .map(|(p, id)| (*id, p.clone(), self.summary[id].clone()))
             .collect();
         let chunks = self.chunks.iter().map(|(_, c)| *c).collect();
         let saved = Saved {
@@ -204,8 +207,9 @@ impl DocStore {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
         let mut t = Self::new(saved.max_mapped);
-        for (id, path) in saved.docs {
+        for (id, path, summary) in saved.docs {
             t.unmapped.insert(id, path.clone());
+            t.summary.insert(id, summary);
             t.by_path.insert(path, id);
         }
         for chunk in saved.chunks {
@@ -227,23 +231,23 @@ impl DocStore {
         Ok(t)
     }
 
-    pub fn add_document<'a, S: AsRef<Path>>(
+    pub fn add_document<'a, P: AsRef<Path>, S: AsRef<str>>(
         &'a mut self,
-        path: S,
+        path: P,
+        summary: S,
         chunk_size: usize,
         overlap: usize,
     ) -> Result<impl Iterator<Item = Result<(ChunkId, &'a str)>> + 'a> {
         let path = PathBuf::from(path.as_ref());
-        let id = *self.by_path.entry(path.clone()).or_insert_with(DocId::new);
+        let id = match self.by_path.entry(path.clone()) {
+            Entry::Vacant(e) => *e.insert(DocId::new()),
+            Entry::Occupied(_) => bail!("document {path:?} already loaded"),
+        };
         let chunks = &mut self.chunks;
         let mapped = &mut self.mapped;
-        let doc = if mapped.contains_key(&id) {
-            mapped.get(&id).unwrap()
-        } else {
-            self.unmapped.remove(&id);
-            mapped.insert(id, Doc::new(id, path)?);
-            mapped.get(&id).unwrap()
-        };
+        self.summary.insert(id, summary.as_ref().into());
+        mapped.insert(id, Doc::new(id, path)?);
+        let doc = &mapped[&id];
         Ok(doc.chunks(chunk_size, overlap)?.map(move |chunk| {
             chunks.insert(chunk.id, chunk);
             Ok((chunk.id, doc.get(&chunk)?))
@@ -277,11 +281,14 @@ impl DocStore {
         Ok(chunk)
     }
 
-    pub fn get<'a>(&'a self, chunk: &Chunk) -> Result<&'a str> {
+    /// Get the text of a chunk and the summary of the document it came from. (summary, chunk_text)
+    pub fn get<'a>(&'a self, chunk: &Chunk) -> Result<(&'a str, &'a str)> {
         let doc = self
             .mapped
             .get(&chunk.doc)
             .ok_or_else(|| anyhow!("document isn't loaded"))?;
-        doc.get(chunk)
+        let text = doc.get(chunk)?;
+        let summary = self.summary.get(&chunk.doc).ok_or_else(|| anyhow!("no summary"))?;
+        Ok((summary, text))
     }
 }

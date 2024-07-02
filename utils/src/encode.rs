@@ -13,14 +13,14 @@ fn test_encode() -> Result<()> {
         tokenizer: PathBuf::from(format!("{BASE}/tokenizer.json")),
     })?;
     edb.add(&[
-        (ChunkId::new(), "I've got a lovely bunch of coconuts".into()),
-        (ChunkId::new(), "I like coconuts very much".into()),
+        (ChunkId::new(), "I've got a lovely bunch of coconuts"),
+        (ChunkId::new(), "I like coconuts very much"),
         (
             ChunkId::new(),
-            "A goomba is a character from super mario bros".into(),
+            "A goomba is a character from super mario bros",
         ),
     ])?;
-    let m = edb.search("who here likes coconuts?".into(), 3)?;
+    let m = edb.search("who here likes coconuts?", 3)?;
     println!("{m:?}");
     Ok(())
 }

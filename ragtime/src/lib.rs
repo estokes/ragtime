@@ -30,8 +30,8 @@ pub trait EmbedModel: Sized {
     type Args;
 
     fn new(args: Self::Args) -> Result<Self>;
-    fn add(&mut self, text: &[(ChunkId, &str)]) -> Result<()>;
-    fn search(&mut self, q: &str, n: usize) -> Result<Matches>;
+    fn add<S: AsRef<str>>(&mut self, text: &[(ChunkId, S)]) -> Result<()>;
+    fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Matches>;
 }
 
 pub trait QaPrompt {
@@ -121,9 +121,18 @@ where
         chunk_size: usize,
         overlap: usize,
     ) -> Result<()> {
+        use std::fmt::Write;
+        let mut prompt = Q::Prompt::new();
+        write!(prompt.system(), "Please produce a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
+        write!(prompt.user(), "{}", fs::read_to_string(doc.as_ref())?)?;
+        let mut summary = String::new();
+        for tok in self.qa.ask(prompt.finalize()?, None)? {
+            summary.push_str(&tok?);
+        }
         let chunks = self
             .docs
-            .add_document(doc, chunk_size, overlap)?
+            .add_document(doc, &summary, chunk_size, overlap)?
+            .map(|r| r.map(|(id, chunk)| (id, format!("{summary} {chunk}"))))
             .collect::<Result<Vec<_>>>()?;
         self.db.add(&chunks)?;
         Ok(())
@@ -144,8 +153,8 @@ where
                 for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
                     if *dist <= 0.7 {
                         let chunk = self.docs.get_chunk(*id)?;
-                        let s = self.docs.get(&chunk)?;
-                        write!(dst, "{s}\n\n")?;
+                        let (summary, text) = self.docs.get(&chunk)?;
+                        write!(dst, "Document Summary\n{summary}\n\nDocument Section\n{text}\n\n")?;
                     }
                 }
             }

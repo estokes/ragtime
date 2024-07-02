@@ -34,6 +34,10 @@ struct Args {
     prompt_file: Option<PathBuf>,
     #[arg(long, help = "the prompt string")]
     prompt: Option<String>,
+    #[arg(long, help = "the system prompt")]
+    system_prompt: Option<String>,
+    #[arg(long, default_value = "42", help = "random seed")]
+    seed: u32,
 }
 
 pub fn main() -> Result<()> {
@@ -58,6 +62,7 @@ pub fn main() -> Result<()> {
             .threads
             .unwrap_or(available_parallelism()?.get() as u32),
         ctx_divisor: args.ctx_divisor,
+        seed: args.seed,
         model: args.model,
     })?;
     let mut prompt = Phi3Prompt::new();
@@ -66,6 +71,9 @@ pub fn main() -> Result<()> {
     } else {
         args.prompt.unwrap()
     };
+    if let Some(system_prompt) = args.system_prompt.as_ref() {
+        std::fmt::Write::write_str(&mut prompt.system(), system_prompt)?;
+    }
     std::fmt::Write::write_str(&mut prompt.user(), &prompt_str)?;
     for tok in gen.ask(prompt.finalize()?, None)? {
         let tok = tok?;

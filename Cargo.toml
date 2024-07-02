@@ -1,3 +1,9 @@
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = true
+debug = false
+
 [workspace.dependencies]
 ort = "2.0.0-rc.2"
 anyhow = "1"

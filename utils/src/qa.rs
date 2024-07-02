@@ -46,6 +46,8 @@ struct Args {
     quiet: bool,
     #[arg(long, help = "document to add to the index, may be repeated")]
     add_document: Vec<PathBuf>,
+    #[arg(long, default_value = "42", help = "random seed")]
+    seed: u32,
 }
 
 impl Args {
@@ -89,6 +91,7 @@ impl Args {
                 backend,
                 threads,
                 ctx_divisor: self.ctx_divisor,
+                seed: self.seed,
                 model: qa_model.clone(),
             },
         )?;

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::{bge_m3::onnx::BgeArgs, phi3::llama::Phi3Args, RagQaPhi3BgeM3};
+use ragtime::{gte_large_en::onnx::GteLargeEnArgs, phi3::llama::Phi3Args, RagQaPhi3GteLargeEn};
 use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
@@ -51,7 +51,7 @@ struct Args {
 }
 
 impl Args {
-    fn init(&self) -> Result<(bool, RagQaPhi3BgeM3)> {
+    fn init(&self) -> Result<(bool, RagQaPhi3GteLargeEn)> {
         tracing_subscriber::fmt::init();
         ort::init().commit()?;
         let backend = Arc::new({
@@ -63,7 +63,7 @@ impl Args {
         });
         if let Some(cp) = &self.checkpoint {
             let view = self.add_document.is_empty();
-            if let Ok(qa) = RagQaPhi3BgeM3::load((), Arc::clone(&backend), cp, view) {
+            if let Ok(qa) = RagQaPhi3GteLargeEn::load((), Arc::clone(&backend), cp, view) {
                 return Ok((view, qa));
             }
         }
@@ -81,9 +81,9 @@ impl Args {
             .ok_or_else(|| anyhow!("qa model is required"))?;
         let npar = available_parallelism()?.get() as u32;
         let threads = self.threads.unwrap_or_else(|| npar);
-        let qa = RagQaPhi3BgeM3::new(
+        let qa = RagQaPhi3GteLargeEn::new(
             self.max_mapped,
-            BgeArgs {
+            GteLargeEnArgs {
                 model: emb_model.clone(),
                 tokenizer: emb_tokenizer.clone(),
             },

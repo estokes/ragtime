@@ -1,12 +1,10 @@
-use crate::session_from_model_file;
-use crate::{doc::ChunkId, EmbedModel, Persistable};
+use crate::{doc::ChunkId, l2_normalize, session_from_model_file, EmbedModel, Persistable};
 use anyhow::{anyhow, bail, Result};
-use ndarray::{s, Array2, Axis};
-use ort::{inputs, Session, SessionOutputs};
+use ndarray::{Array1, Array2, Axis};
+use ort::{inputs, Session};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{File, OpenOptions},
-    path::{Path, PathBuf},
+    fs::{File, OpenOptions}, iter, path::{Path, PathBuf}
 };
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
@@ -14,13 +12,13 @@ use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
 const DIMS: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BgeArgs {
+pub struct GteLargeEnArgs {
     pub model: PathBuf,
     pub tokenizer: PathBuf,
 }
 
-pub struct BgeM3 {
-    params: BgeArgs,
+pub struct GteLargeEn {
+    params: GteLargeEnArgs,
     session: Session,
     tokenizer: Tokenizer,
     index: Index,
@@ -34,7 +32,7 @@ fn options(dims: usize) -> IndexOptions {
     opts
 }
 
-impl Persistable for BgeM3 {
+impl Persistable for GteLargeEn {
     type Ctx = ();
 
     fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -48,7 +46,7 @@ impl Persistable for BgeM3 {
 
     fn load<P: AsRef<Path>>(_ctx: (), path: P, view: bool) -> Result<Self> {
         let mut fd = File::open(path.as_ref())?;
-        let params: BgeArgs = serde_json::from_reader(&mut fd)?;
+        let params: GteLargeEnArgs = serde_json::from_reader(&mut fd)?;
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         let index = Index::new(&options(DIMS))?;
         let mut path = PathBuf::from(path.as_ref());
@@ -68,8 +66,8 @@ impl Persistable for BgeM3 {
     }
 }
 
-impl EmbedModel for BgeM3 {
-    type Args = BgeArgs;
+impl EmbedModel for GteLargeEn {
+    type Args = GteLargeEnArgs;
 
     fn new(params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
@@ -83,38 +81,45 @@ impl EmbedModel for BgeM3 {
         })
     }
 
-    fn add<S: AsRef<str>>(&mut self, text: &[(ChunkId, S)]) -> Result<()> {
+    fn add<S: AsRef<str>>(&mut self, summary: S, text: &[(ChunkId, S)]) -> Result<()> {
         let embed = Self::embed(
             &self.tokenizer,
             &self.session,
-            text.iter().map(|(_, t)| t.as_ref()).collect(),
+            iter::once(summary.as_ref())
+                .chain(text.iter().map(|(_, t)| t.as_ref()))
+                .collect(),
         )?;
-        let embed = embed["sentence_embedding"].try_extract_tensor::<f32>()?;
-        for (e, (id, _)) in embed.axis_iter(Axis(0)).zip(text.iter()) {
-            let d = e.as_slice().ok_or_else(|| anyhow!("could not get slice"))?;
-            self.index.add(id.0, d)?
+        let mut iter = embed.axis_iter(Axis(0));
+        let summary = &iter
+            .next()
+            .ok_or_else(|| anyhow!("no summary"))? * 0.5;
+        let mut tmp = Array1::zeros(summary.shape()[0]);
+        for (e, (id, _)) in iter.zip(text.iter()) {
+            tmp.assign(&e);
+            tmp += &summary;
+            l2_normalize(tmp.as_slice_mut().ok_or_else(|| anyhow!("could not get embedding"))?);
+            self.index.add(id.0, tmp.as_slice().unwrap())?
         }
         Ok(())
     }
 
     /// The keys component of Matches is a vec of ChunkIds represented as u64s.
     fn search<S: AsRef<str>>(&mut self, text: S, n: usize) -> Result<Matches> {
-        let qembed = Self::embed(&self.tokenizer, &self.session, vec![text.as_ref()])?;
-        let qembed = qembed["sentence_embedding"].try_extract_tensor::<f32>()?;
-        let qembed = qembed.slice(s![0, ..]);
+        let mut qembed = Self::embed(&self.tokenizer, &self.session, vec![text.as_ref()])?;
         let qembed = qembed
-            .as_slice()
-            .ok_or_else(|| anyhow!("could not get sentence embedding"))?;
+            .as_slice_mut()
+            .ok_or_else(|| anyhow!("could not get embedding"))?;
+        l2_normalize(qembed);
         Ok(self.index.search(qembed, n)?)
     }
 }
 
-impl BgeM3 {
+impl GteLargeEn {
     fn embed<'a>(
         tokenizer: &Tokenizer,
         session: &'a Session,
         text: Vec<&str>,
-    ) -> Result<SessionOutputs<'a>> {
+    ) -> Result<Array2<f32>> {
         if text.len() == 0 {
             bail!("can't add an empty batch")
         }
@@ -142,6 +147,15 @@ impl BgeM3 {
                 1i64
             }
         });
-        Ok(session.run(inputs![input, attention_mask]?)?)
+        let token_type_ids: Array2<i64> = Array2::zeros((tokens.len(), longest));
+        let res = session.run(inputs![input, attention_mask, token_type_ids]?)?;
+        let res = res["last_hidden_state"].try_extract_tensor::<f32>()?;
+        let shape = res.shape();
+        let mut out: Array2<f32> = Array2::zeros((shape[0], shape[2]));
+        for (i, e) in res.axis_iter(Axis(0)).enumerate() {
+            let mut v = out.row_mut(i);
+            v.assign(&e.mean_axis(Axis(0)).ok_or_else(|| anyhow!("could not get mean"))?);
+        }
+        Ok(out)
     }
 }

@@ -12,6 +12,7 @@ debug = false
 [features]
 vulkan = ["ragtime/vulkan"]
 native = ["ragtime/native"]
+cuda = ["ragtime/cuda"]
 
 [[bin]]
 name = "encode"

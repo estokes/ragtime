@@ -2,12 +2,14 @@ use crate::doc::{ChunkId, DocStore};
 use anyhow::{anyhow, bail, Result};
 use compact_str::CompactString;
 use ort::Session;
+use smallvec::SmallVec;
 use std::{cmp::min, fmt::Debug, fs, path::Path, thread::available_parallelism};
 use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
 pub mod bge_m3;
 pub mod doc;
+pub mod gte_large_en;
 pub mod phi3;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
@@ -17,6 +19,16 @@ fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Se
         .commit_from_file(model)?;
     let tokenizer = Tokenizer::from_file(tokenizer).map_err(|e| anyhow!("{e:?}"))?;
     Ok((session, tokenizer))
+}
+
+fn l2_normalize(input: &mut [f32]) {
+    let magnitude = input
+        .iter()
+        .fold(0.0, |acc, &val| val.mul_add(val, acc))
+        .sqrt();
+    for val in input {
+        *val /= magnitude;
+    }
 }
 
 pub trait Persistable: Sized {
@@ -30,7 +42,7 @@ pub trait EmbedModel: Sized {
     type Args;
 
     fn new(args: Self::Args) -> Result<Self>;
-    fn add<S: AsRef<str>>(&mut self, text: &[(ChunkId, S)]) -> Result<()>;
+    fn add<S: AsRef<str>>(&mut self, summary: S, text: &[(ChunkId, S)]) -> Result<()>;
     fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Matches>;
 }
 
@@ -132,9 +144,8 @@ where
         let chunks = self
             .docs
             .add_document(doc, &summary, chunk_size, overlap)?
-            .map(|r| r.map(|(id, chunk)| (id, format!("{summary} {chunk}"))))
-            .collect::<Result<Vec<_>>>()?;
-        self.db.add(&chunks)?;
+            .collect::<Result<SmallVec<[_; 128]>>>()?;
+        self.db.add(summary.as_str(), &chunks)?;
         Ok(())
     }
 
@@ -154,7 +165,10 @@ where
                     if *dist <= 0.7 {
                         let chunk = self.docs.get_chunk(*id)?;
                         let (summary, text) = self.docs.get(&chunk)?;
-                        write!(dst, "Document Summary\n{summary}\n\nDocument Section\n{text}\n\n")?;
+                        write!(
+                            dst,
+                            "Document Summary\n{summary}\n\nDocument Section\n{text}\n\n"
+                        )?;
                     }
                 }
             }
@@ -175,3 +189,4 @@ where
 }
 
 pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
+pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;

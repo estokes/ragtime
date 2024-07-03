@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 vulkan = ["llama-cpp-2/vulkan"]
 native = ["llama-cpp-2/native"]
+cuda = ["llama-cpp-2/cuda"]
 
 [dependencies]
 ort = { workspace = true }
@@ -25,3 +26,4 @@ llama-cpp-2 = { workspace = true }
 encoding_rs = { workspace = true }
 compact_str = { workspace = true }
 tracing = { workspace = true }
+smallvec = { workspace = true }

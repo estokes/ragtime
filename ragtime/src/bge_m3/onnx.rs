@@ -83,7 +83,7 @@ impl EmbedModel for BgeM3 {
         })
     }
 
-    fn add<S: AsRef<str>>(&mut self, text: &[(ChunkId, S)]) -> Result<()> {
+    fn add<S: AsRef<str>>(&mut self, _summary: S, text: &[(ChunkId, S)]) -> Result<()> {
         let embed = Self::embed(
             &self.tokenizer,
             &self.session,

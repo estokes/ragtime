@@ -22,6 +22,7 @@ indexmap = "2.2.6"
 llama-cpp-2 = { path = "../llama-cpp-rs/llama-cpp-2" }
 encoding_rs = "0.8.34"
 compact_str = "0.7.1"
+smallvec = {version = "1", features = ["union", "const_generics"]}
 
 [workspace]
 resolver = "2"

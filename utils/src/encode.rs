@@ -12,7 +12,7 @@ fn test_encode() -> Result<()> {
         model: PathBuf::from(format!("{BASE}/model.onnx")),
         tokenizer: PathBuf::from(format!("{BASE}/tokenizer.json")),
     })?;
-    edb.add(&[
+    edb.add("", &[
         (ChunkId::new(), "I've got a lovely bunch of coconuts"),
         (ChunkId::new(), "I like coconuts very much"),
         (

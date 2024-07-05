@@ -4,7 +4,9 @@ use ndarray::{Array1, Array2, Axis};
 use ort::{inputs, Session};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{File, OpenOptions}, iter, path::{Path, PathBuf}
+    fs::{File, OpenOptions},
+    iter,
+    path::{Path, PathBuf},
 };
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
@@ -90,14 +92,15 @@ impl EmbedModel for GteLargeEn {
                 .collect(),
         )?;
         let mut iter = embed.axis_iter(Axis(0));
-        let summary = &iter
-            .next()
-            .ok_or_else(|| anyhow!("no summary"))? * 0.5;
+        let summary = &iter.next().ok_or_else(|| anyhow!("no summary"))? * 0.5;
         let mut tmp = Array1::zeros(summary.shape()[0]);
         for (e, (id, _)) in iter.zip(text.iter()) {
             tmp.assign(&e);
             tmp += &summary;
-            l2_normalize(tmp.as_slice_mut().ok_or_else(|| anyhow!("could not get embedding"))?);
+            l2_normalize(
+                tmp.as_slice_mut()
+                    .ok_or_else(|| anyhow!("could not get embedding"))?,
+            );
             self.index.add(id.0, tmp.as_slice().unwrap())?
         }
         Ok(())
@@ -153,8 +156,10 @@ impl GteLargeEn {
         let shape = res.shape();
         let mut out: Array2<f32> = Array2::zeros((shape[0], shape[2]));
         for (i, e) in res.axis_iter(Axis(0)).enumerate() {
-            let mut v = out.row_mut(i);
-            v.assign(&e.mean_axis(Axis(0)).ok_or_else(|| anyhow!("could not get mean"))?);
+            out.row_mut(i).assign(
+                &e.mean_axis(Axis(0))
+                    .ok_or_else(|| anyhow!("could not get mean"))?,
+            );
         }
         Ok(out)
     }

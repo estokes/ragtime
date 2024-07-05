@@ -48,6 +48,11 @@ struct Args {
     add_document: Vec<PathBuf>,
     #[arg(long, default_value = "42", help = "random seed")]
     seed: u32,
+    #[arg(
+        long,
+        help = "do not question, only retreive and display matching document chunks"
+    )]
+    retrieve_only: bool,
 }
 
 impl Args {
@@ -117,10 +122,16 @@ pub fn main() -> Result<()> {
         line.clear();
         stdin.read_line(&mut line)?;
         let start = Utc::now();
-        for tok in qa.ask(&line, None)? {
-            let tok = tok?;
-            print!("{tok}");
-            stdout().flush()?;
+        if args.retrieve_only {
+            for res in qa.search(&line, 3)? {
+                println!("{res:?}")
+            }
+        } else {
+            for tok in qa.ask(&line, None)? {
+                let tok = tok?;
+                print!("{tok}");
+                stdout().flush()?;
+            }
         }
         println!(
             "\nquery time: {}ms",

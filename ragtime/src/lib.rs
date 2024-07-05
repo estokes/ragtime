@@ -69,6 +69,13 @@ pub trait QaModel: Sized {
     ) -> Result<impl Iterator<Item = Result<CompactString>> + 'a>;
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub distance: f32,
+    pub summary: String,
+    pub text: String,
+}
+
 pub struct RagQa<E, Q> {
     docs: DocStore,
     db: E,
@@ -185,6 +192,24 @@ where
         let prompt = self.encode_prompt(q.as_ref())?;
         tracing::debug!("{:?}", prompt);
         self.qa.ask(prompt, gen_max)
+    }
+
+    pub fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Vec<SearchResult>> {
+        let matches = self.db.search(q, n)?;
+        matches
+            .keys
+            .iter()
+            .zip(matches.distances.iter())
+            .map(|(id, dist)| {
+                let chunk = self.docs.get_chunk(*id)?;
+                let (summary, text) = self.docs.get(&chunk)?;
+                Ok(SearchResult {
+                    distance: *dist,
+                    summary: summary.to_string(),
+                    text: text.to_string(),
+                })
+            })
+            .collect::<Result<_>>()
     }
 }
 

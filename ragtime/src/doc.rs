@@ -30,6 +30,10 @@ pub struct ChunkId(pub u64);
 
 static NEXT_CHUNKID: AtomicU64 = AtomicU64::new(0);
 
+fn word_boundry(x: u8) -> bool {
+    x == 32 || x == 10 || x == 9
+}
+
 impl ChunkId {
     pub fn new() -> Self {
         Self(NEXT_CHUNKID.fetch_add(1, Ordering::Relaxed))
@@ -48,9 +52,6 @@ impl<'a> Iterator for ChunkIter<'a> {
     type Item = Chunk;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn word_boundry(x: u8) -> bool {
-            x == 32 || x == 10 || x == 9
-        }
         let mut ntok = 0;
         let mut overlap = 0;
         let mut pos = self.pos;

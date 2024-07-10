@@ -2,11 +2,9 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use ragtime::{
-    phi3::{
-        llama::{Phi3, Phi3Args},
-        prompt::Phi3Prompt,
-    },
-    QaModel, QaPrompt,
+    llama,
+    phi3::{llama::Phi3, prompt::Phi3Prompt},
+    FormattedPrompt, QaModel,
 };
 use std::{
     io::{stdout, Write},
@@ -56,15 +54,17 @@ pub fn main() -> Result<()> {
         }
         be
     });
-    let mut gen = Phi3::new(Phi3Args {
+    let mut gen = Phi3::new(
         backend,
-        threads: args
-            .threads
-            .unwrap_or(available_parallelism()?.get() as u32),
-        ctx_divisor: args.ctx_divisor,
-        seed: args.seed,
-        model: args.model,
-    })?;
+        llama::Args::default()
+            .with_threads(
+                args.threads
+                    .unwrap_or(available_parallelism()?.get() as u32),
+            )
+            .with_ctx_divisor(args.ctx_divisor)
+            .with_seed(args.seed)
+            .with_model(args.model),
+    )?;
     let mut prompt = Phi3Prompt::new();
     let prompt_str = if let Some(prompt_file) = args.prompt_file {
         std::fs::read_to_string(prompt_file)?

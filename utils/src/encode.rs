@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 fn test_encode() -> Result<()> {
     const BASE: &str = "/home/eric/proj/bge-m3/onnx";
-    let mut edb = BgeM3::new(BgeArgs {
+    let mut edb = BgeM3::new((), BgeArgs {
         model: PathBuf::from(format!("{BASE}/model.onnx")),
         tokenizer: PathBuf::from(format!("{BASE}/tokenizer.json")),
     })?;

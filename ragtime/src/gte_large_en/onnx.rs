@@ -69,9 +69,10 @@ impl Persistable for GteLargeEn {
 }
 
 impl EmbedModel for GteLargeEn {
+    type Ctx = ();
     type Args = GteLargeEnArgs;
 
-    fn new(params: Self::Args) -> Result<Self> {
+    fn new(_ctx: (), params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         let index = Index::new(&options(DIMS))?;
         index.reserve(1000)?;
@@ -109,9 +110,13 @@ impl EmbedModel for GteLargeEn {
     /// The keys component of Matches is a vec of ChunkIds represented as u64s.
     fn search<S: AsRef<str>>(&mut self, text: S, n: usize) -> Result<Matches> {
         let mut qembed = Self::embed(&self.tokenizer, &self.session, vec![text.as_ref()])?;
+        let mut qembed = qembed
+            .axis_iter_mut(Axis(0))
+            .next()
+            .ok_or_else(|| anyhow!("no query"))?;
         let qembed = qembed
             .as_slice_mut()
-            .ok_or_else(|| anyhow!("could not get embedding"))?;
+            .ok_or_else(|| anyhow!("could not get slice"))?;
         l2_normalize(qembed);
         Ok(self.index.search(qembed, n)?)
     }
@@ -127,7 +132,7 @@ impl GteLargeEn {
             bail!("can't add an empty batch")
         }
         let tokens = tokenizer
-            .encode_batch(text, false)
+            .encode_batch(text, true)
             .map_err(|e| anyhow!("{e:?}"))?;
         let longest = tokens
             .iter()
@@ -156,10 +161,9 @@ impl GteLargeEn {
         let shape = res.shape();
         let mut out: Array2<f32> = Array2::zeros((shape[0], shape[2]));
         for (i, e) in res.axis_iter(Axis(0)).enumerate() {
-            out.row_mut(i).assign(
-                &e.mean_axis(Axis(0))
-                    .ok_or_else(|| anyhow!("could not get mean"))?,
-            );
+            // &e.mean_axis(Axis(0))
+            //   .ok_or_else(|| anyhow!("could not get mean"))?,
+            out.row_mut(i).assign(&e.index_axis(Axis(0), 0));
         }
         Ok(out)
     }

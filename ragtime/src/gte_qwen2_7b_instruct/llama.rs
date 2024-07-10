@@ -1,5 +1,4 @@
-/// this is broken at the moment, no model I've been able to find has the proper pooling layers
-use crate::doc::ChunkId;
+use crate::{doc::ChunkId, Persistable};
 use anyhow::{anyhow, bail, Context, Result};
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
@@ -27,7 +26,7 @@ struct Saved {
     model: PathBuf,
 }
 
-pub struct EmbedDbInner {
+pub struct GteQwen27BInstructInner {
     params: Saved,
     ctx: Option<LlamaContext<'static>>,
     model: LlamaModel,
@@ -36,7 +35,7 @@ pub struct EmbedDbInner {
     _pin: PhantomPinned,
 }
 
-impl EmbedDbInner {
+impl GteQwen27BInstructInner {
     fn ctx_mut(self: Pin<&mut Self>) -> &mut LlamaContext<'static> {
         // it's always safe to get a mutable reference to context this
         // way since model is the thing who's address really can't
@@ -45,13 +44,44 @@ impl EmbedDbInner {
     }
 }
 
-pub struct EmbedDb(Pin<Box<EmbedDbInner>>);
+pub struct GteQwen27BInstruct(Pin<Box<GteQwen27BInstructInner>>);
 
-impl Deref for EmbedDb {
-    type Target = EmbedDbInner;
+impl Deref for GteQwen27BInstruct{
+    type Target = GteQwen27BInstructInner;
 
     fn deref(&self) -> &Self::Target {
         &*self.0
+    }
+}
+
+impl Persistable for GteQwen27BInstruct {
+    type Ctx = Arc<LlamaBackend>;
+
+    fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let mut path = PathBuf::from(path.as_ref());
+        path.set_extension("json");
+        let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
+        serde_json::to_writer_pretty(&mut fd, &self.params)?;
+        path.set_extension("usearch");
+        Ok(self.index.save(&*path.to_string_lossy())?)
+    }
+
+    fn load<P: AsRef<Path>>(backend: Self::Ctx, path: P, view: bool) -> Result<Self> {
+        let mut fd = File::open(path.as_ref())?;
+        let params: Saved = serde_json::from_reader(&mut fd)?;
+        let new_index = |dims| -> Result<Index> {
+            let index = Index::new(&options(dims))?;
+            let mut path = PathBuf::from(path.as_ref());
+            path.set_extension("usearch");
+            let path = path.to_string_lossy();
+            if view {
+                index.view(&*path)?
+            } else {
+                index.load(&*path)?;
+            }
+            Ok(index)
+        };
+        Self::init_with_index(new_index, backend, &params.model)
     }
 }
 
@@ -63,7 +93,7 @@ fn options(dims: usize) -> IndexOptions {
     opts
 }
 
-impl EmbedDb {
+impl GteQwen27BInstruct {
     fn init_with_index<P: AsRef<Path>>(
         mut new_index: impl FnMut(usize) -> Result<Index>,
         backend: Arc<LlamaBackend>,
@@ -108,33 +138,6 @@ impl EmbedDb {
     pub fn new<P: AsRef<Path>>(backend: Arc<LlamaBackend>, model: P) -> Result<Self> {
         let new_index = |dims| Ok(Index::new(&options(dims))?);
         Self::init_with_index(new_index, backend, model)
-    }
-
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let mut path = PathBuf::from(path.as_ref());
-        path.set_extension("json");
-        let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
-        serde_json::to_writer_pretty(&mut fd, &self.params)?;
-        path.set_extension("usearch");
-        Ok(self.index.save(&*path.to_string_lossy())?)
-    }
-
-    pub fn load<P: AsRef<Path>>(backend: Arc<LlamaBackend>, path: P, view: bool) -> Result<Self> {
-        let mut fd = File::open(path.as_ref())?;
-        let params: Saved = serde_json::from_reader(&mut fd)?;
-        let new_index = |dims| -> Result<Index> {
-            let index = Index::new(&options(dims))?;
-            let mut path = PathBuf::from(path.as_ref());
-            path.set_extension("usearch");
-            let path = path.to_string_lossy();
-            if view {
-                index.view(&*path)?
-            } else {
-                index.load(&*path)?;
-            }
-            Ok(index)
-        };
-        Self::init_with_index(new_index, backend, &params.model)
     }
 
     fn embed<'a, I: IntoIterator<Item = &'a str>>(

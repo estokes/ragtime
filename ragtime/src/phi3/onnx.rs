@@ -94,10 +94,11 @@ impl<'a> Iterator for TokenIter<'a> {
 }
 
 impl QaModel for Phi3 {
+    type Ctx = ();
     type Args = Saved;
     type Prompt = Phi3Prompt;
 
-    fn new(params: Saved) -> Result<Self> {
+    fn new(_ctx: (), params: Saved) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         Ok(Self {
             params,

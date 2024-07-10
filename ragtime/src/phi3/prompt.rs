@@ -1,6 +1,5 @@
+use crate::FormattedPrompt;
 use anyhow::Result;
-
-use crate::QaPrompt;
 use std::fmt::Write;
 
 struct Writer<'a>(&'a mut String);
@@ -28,10 +27,16 @@ impl<'a> Drop for Writer<'a> {
 #[derive(Debug)]
 pub struct Phi3FinalPrompt(pub(super) String);
 
+impl AsRef<str> for Phi3FinalPrompt {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
 pub struct Phi3Prompt(String);
 
-impl QaPrompt for Phi3Prompt {
+impl FormattedPrompt for Phi3Prompt {
     type FinalPrompt = Phi3FinalPrompt;
 
     fn system<'a>(&'a mut self) -> impl std::fmt::Write + 'a {

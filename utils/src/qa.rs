@@ -2,7 +2,9 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::{gte_large_en::onnx::GteLargeEnArgs, phi3::llama::Phi3Args, RagQaPhi3GteLargeEn};
+use ragtime::{
+    gte_large_en::onnx::GteLargeEnArgs, llama, RagQaPhi3GteLargeEn,
+};
 use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
@@ -88,17 +90,17 @@ impl Args {
         let threads = self.threads.unwrap_or_else(|| npar);
         let qa = RagQaPhi3GteLargeEn::new(
             self.max_mapped,
+            (),
             GteLargeEnArgs {
                 model: emb_model.clone(),
                 tokenizer: emb_tokenizer.clone(),
             },
-            Phi3Args {
-                backend,
-                threads,
-                ctx_divisor: self.ctx_divisor,
-                seed: self.seed,
-                model: qa_model.clone(),
-            },
+            backend,
+            llama::Args::default()
+                .with_threads(threads)
+                .with_ctx_divisor(self.ctx_divisor)
+                .with_seed(self.seed)
+                .with_model(qa_model.clone()),
         )?;
         Ok((false, qa))
     }
@@ -115,11 +117,12 @@ pub fn main() -> Result<()> {
             qa.save(cp)?;
         }
     }
-    println!("ready");
     let mut line = String::new();
     let mut stdin = BufReader::new(stdin());
     loop {
         line.clear();
+        print!("ready> ");
+        stdout().flush()?;
         stdin.read_line(&mut line)?;
         let start = Utc::now();
         if args.retrieve_only {

@@ -69,9 +69,10 @@ impl Persistable for BgeM3 {
 }
 
 impl EmbedModel for BgeM3 {
+    type Ctx = ();
     type Args = BgeArgs;
 
-    fn new(params: Self::Args) -> Result<Self> {
+    fn new(_ctx: (), params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
         let index = Index::new(&options(DIMS))?;
         index.reserve(1000)?;

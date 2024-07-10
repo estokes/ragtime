@@ -10,7 +10,9 @@ use usearch::ffi::Matches;
 pub mod bge_m3;
 pub mod doc;
 pub mod gte_large_en;
+//pub mod gte_qwen2_7b_instruct;
 pub mod phi3;
+pub mod llama;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -39,15 +41,16 @@ pub trait Persistable: Sized {
 }
 
 pub trait EmbedModel: Sized {
+    type Ctx;
     type Args;
 
-    fn new(args: Self::Args) -> Result<Self>;
+    fn new(ctx: Self::Ctx, args: Self::Args) -> Result<Self>;
     fn add<S: AsRef<str>>(&mut self, summary: S, text: &[(ChunkId, S)]) -> Result<()>;
     fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Matches>;
 }
 
-pub trait QaPrompt {
-    type FinalPrompt: Debug;
+pub trait FormattedPrompt {
+    type FinalPrompt: Debug + AsRef<str>;
 
     fn new() -> Self;
     fn with_capacity(n: usize) -> Self;
@@ -58,13 +61,14 @@ pub trait QaPrompt {
 }
 
 pub trait QaModel: Sized {
+    type Ctx;
     type Args;
-    type Prompt: QaPrompt;
+    type Prompt: FormattedPrompt;
 
-    fn new(args: Self::Args) -> Result<Self>;
+    fn new(ctx: Self::Ctx, args: Self::Args) -> Result<Self>;
     fn ask<'a>(
         &'a mut self,
-        q: <Self::Prompt as QaPrompt>::FinalPrompt,
+        q: <Self::Prompt as FormattedPrompt>::FinalPrompt,
         gen_max: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>> + 'a>;
 }
@@ -127,10 +131,16 @@ where
     E: EmbedModel,
     Q: QaModel,
 {
-    pub fn new(max_mapped: usize, embed_args: E::Args, qa_args: Q::Args) -> Result<Self> {
+    pub fn new(
+        max_mapped: usize,
+        embed_ctx: E::Ctx,
+        embed_args: E::Args,
+        qa_ctx: Q::Ctx,
+        qa_args: Q::Args,
+    ) -> Result<Self> {
         let docs = DocStore::new(max_mapped);
-        let db = E::new(embed_args)?;
-        let qa = Q::new(qa_args)?;
+        let db = E::new(embed_ctx, embed_args)?;
+        let qa = Q::new(qa_ctx, qa_args)?;
         Ok(Self { docs, db, qa })
     }
 
@@ -141,13 +151,21 @@ where
         overlap: usize,
     ) -> Result<()> {
         use std::fmt::Write;
-        let mut prompt = Q::Prompt::new();
-        write!(prompt.system(), "Please produce a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
-        write!(prompt.user(), "{}", fs::read_to_string(doc.as_ref())?)?;
-        let mut summary = String::new();
-        for tok in self.qa.ask(prompt.finalize()?, None)? {
-            summary.push_str(&tok?);
-        }
+        let summary = {
+            let mut summary = String::new();
+            let txt = fs::read_to_string(doc.as_ref())?;
+            if txt.len() >= 512 {
+                let mut prompt = Q::Prompt::new();
+                write!(prompt.system(), "Please produce a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
+                write!(prompt.user(), "{}", txt)?;
+                for tok in self.qa.ask(prompt.finalize()?, None)? {
+                    summary.push_str(&tok?);
+                }
+            } else {
+                summary.push_str("this text is too short to summarize");
+            }
+            summary
+        };
         let chunks = self
             .docs
             .add_document(doc, &summary, chunk_size, overlap)?
@@ -156,7 +174,7 @@ where
         Ok(())
     }
 
-    fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as QaPrompt>::FinalPrompt> {
+    fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as FormattedPrompt>::FinalPrompt> {
         use std::fmt::Write;
         let mut prompt = Q::Prompt::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
         let matches = self.db.search(q, 3)?;

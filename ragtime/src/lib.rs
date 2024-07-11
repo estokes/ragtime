@@ -11,8 +11,9 @@ pub mod bge_m3;
 pub mod doc;
 pub mod gte_large_en;
 //pub mod gte_qwen2_7b_instruct;
-pub mod phi3;
 pub mod llama;
+pub mod phi3;
+pub mod simple_prompt;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -40,15 +41,6 @@ pub trait Persistable: Sized {
     fn load<P: AsRef<Path>>(ctx: Self::Ctx, path: P, view: bool) -> Result<Self>;
 }
 
-pub trait EmbedModel: Sized {
-    type Ctx;
-    type Args;
-
-    fn new(ctx: Self::Ctx, args: Self::Args) -> Result<Self>;
-    fn add<S: AsRef<str>>(&mut self, summary: S, text: &[(ChunkId, S)]) -> Result<()>;
-    fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Matches>;
-}
-
 pub trait FormattedPrompt {
     type FinalPrompt: Debug + AsRef<str>;
 
@@ -58,6 +50,25 @@ pub trait FormattedPrompt {
     fn user<'a>(&'a mut self) -> impl std::fmt::Write + 'a;
     fn finalize(self) -> Result<Self::FinalPrompt>;
     fn clear(&mut self);
+}
+
+pub trait EmbedModel: Sized {
+    type Ctx;
+    type Args;
+    type SearchPrompt: FormattedPrompt;
+    type EmbedPrompt: FormattedPrompt;
+
+    fn new(ctx: Self::Ctx, args: Self::Args) -> Result<Self>;
+    fn add(
+        &mut self,
+        summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,
+        text: &[(ChunkId, <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt)],
+    ) -> Result<()>;
+    fn search(
+        &mut self,
+        q: <Self::SearchPrompt as FormattedPrompt>::FinalPrompt,
+        n: usize,
+    ) -> Result<Matches>;
 }
 
 pub trait QaModel: Sized {
@@ -169,15 +180,26 @@ where
         let chunks = self
             .docs
             .add_document(doc, &summary, chunk_size, overlap)?
+            .map(|r| {
+                r.and_then(|(id, s)| {
+                    let mut prompt = E::EmbedPrompt::new();
+                    write!(prompt.user(), "{s}")?;
+                    Ok((id, prompt.finalize()?))
+                })
+            })
             .collect::<Result<SmallVec<[_; 128]>>>()?;
-        self.db.add(summary.as_str(), &chunks)?;
+        let mut p = E::EmbedPrompt::new();
+        write!(p.user(), "{summary}")?;
+        self.db.add(p.finalize()?, &chunks)?;
         Ok(())
     }
 
     fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as FormattedPrompt>::FinalPrompt> {
         use std::fmt::Write;
         let mut prompt = Q::Prompt::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
-        let matches = self.db.search(q, 3)?;
+        let mut sprompt = E::SearchPrompt::new();
+        write!(sprompt.user(), "{q}")?;
+        let matches = self.db.search(sprompt.finalize()?, 3)?;
         {
             let mut dst = prompt.system();
             if matches.distances.len() == 0 || matches.distances[0] > 0.7 {
@@ -213,7 +235,10 @@ where
     }
 
     pub fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Vec<SearchResult>> {
-        let matches = self.db.search(q, n)?;
+        use std::fmt::Write;
+        let mut sprompt = E::SearchPrompt::new();
+        write!(sprompt.user(), "{}", q.as_ref())?;
+        let matches = self.db.search(sprompt.finalize()?, n)?;
         matches
             .keys
             .iter()

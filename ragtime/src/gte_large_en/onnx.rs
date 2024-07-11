@@ -1,4 +1,7 @@
-use crate::{doc::ChunkId, l2_normalize, session_from_model_file, EmbedModel, Persistable};
+use crate::{
+    doc::ChunkId, l2_normalize, session_from_model_file, simple_prompt::SimplePrompt, EmbedModel,
+    FormattedPrompt, Persistable,
+};
 use anyhow::{anyhow, bail, Result};
 use ndarray::{Array1, Array2, Axis};
 use ort::{inputs, Session};
@@ -71,6 +74,8 @@ impl Persistable for GteLargeEn {
 impl EmbedModel for GteLargeEn {
     type Ctx = ();
     type Args = GteLargeEnArgs;
+    type EmbedPrompt = SimplePrompt;
+    type SearchPrompt = SimplePrompt;
 
     fn new(_ctx: (), params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
@@ -84,7 +89,11 @@ impl EmbedModel for GteLargeEn {
         })
     }
 
-    fn add<S: AsRef<str>>(&mut self, summary: S, text: &[(ChunkId, S)]) -> Result<()> {
+    fn add(
+        &mut self,
+        summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,
+        text: &[(ChunkId, <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt)],
+    ) -> Result<()> {
         let embed = Self::embed(
             &self.tokenizer,
             &self.session,
@@ -108,7 +117,11 @@ impl EmbedModel for GteLargeEn {
     }
 
     /// The keys component of Matches is a vec of ChunkIds represented as u64s.
-    fn search<S: AsRef<str>>(&mut self, text: S, n: usize) -> Result<Matches> {
+    fn search(
+        &mut self,
+        text: <Self::SearchPrompt as FormattedPrompt>::FinalPrompt,
+        n: usize,
+    ) -> Result<Matches> {
         let mut qembed = Self::embed(&self.tokenizer, &self.session, vec![text.as_ref()])?;
         let mut qembed = qembed
             .axis_iter_mut(Axis(0))

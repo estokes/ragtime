@@ -1,5 +1,5 @@
-use crate::{FormattedPrompt, Persistable, QaModel};
-use anyhow::{anyhow, Ok, Result};
+use crate::{doc::ChunkId, l2_normalize, EmbedModel, FormattedPrompt, Persistable, QaModel};
+use anyhow::{anyhow, bail, Context, Ok, Result};
 use compact_str::CompactString;
 use encoding_rs::Decoder;
 use llama_cpp_2::{
@@ -12,6 +12,7 @@ use llama_cpp_2::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
+    iter,
     marker::PhantomPinned,
     num::NonZeroU32,
     path::{Path, PathBuf},
@@ -19,6 +20,7 @@ use std::{
     sync::Arc,
     thread::available_parallelism,
 };
+use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
 pub trait LlamaQaModel: Default {
     type Prompt: FormattedPrompt;
@@ -27,18 +29,18 @@ pub trait LlamaQaModel: Default {
 }
 
 pub trait LlamaEmbedModel: Default {
-    type Prompt: FormattedPrompt;
+    type EmbedPrompt: FormattedPrompt;
+    type SearchPrompt: FormattedPrompt;
 
-    fn get_embedding(&mut self, ctx: &mut LlamaContext) -> Result<Vec<f32>>;
+    fn get_embedding(&mut self, ctx: &mut LlamaContext, i: i32) -> Result<Vec<f32>>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Args {
-    model: PathBuf,
-    threads: u32,
-    ctx_divisor: u32,
-    seed: u32,
-    embed: bool,
+    pub model: PathBuf,
+    pub threads: u32,
+    pub ctx_divisor: u32,
+    pub seed: u32,
 }
 
 impl Default for Args {
@@ -48,7 +50,6 @@ impl Default for Args {
             threads: available_parallelism().map(|n| n.get() as u32).unwrap_or(8),
             ctx_divisor: 1,
             seed: 42,
-            embed: false,
         }
     }
 }
@@ -73,7 +74,6 @@ impl Args {
         self.seed = seed;
         self
     }
-
 }
 
 struct LlamaInner {
@@ -86,7 +86,7 @@ struct LlamaInner {
 }
 
 impl LlamaInner {
-    fn ctx(self: Pin<&mut Self>) -> &mut LlamaContext<'static> {
+    fn ctx(self: Pin<&mut LlamaInner>) -> &mut LlamaContext<'static> {
         unsafe { self.get_unchecked_mut().ctx.as_mut().unwrap() }
     }
 }
@@ -100,11 +100,10 @@ impl<Model> Llama<Model>
 where
     Model: Default,
 {
-    fn init(ctx: Arc<LlamaBackend>, embeddings: bool, mut args: Args) -> Result<Self> {
+    fn init(ctx: Arc<LlamaBackend>, embed: bool, args: Args) -> Result<Self> {
         let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
         let model = LlamaModel::load_from_file(&ctx, &args.model, &model_params)?;
         let n_ctx = model.n_ctx_train() / args.ctx_divisor;
-        args.embed = embeddings;
         let mut t = Llama {
             inner: Box::pin(LlamaInner {
                 args,
@@ -122,8 +121,8 @@ where
             ))
             .with_n_threads(t.inner.args.threads)
             .with_n_threads_batch(t.inner.args.threads)
+            .with_embeddings(embed)
             .with_seed(t.inner.args.seed)
-            .with_embeddings(embeddings)
             .with_n_batch(n_ctx);
         let ctx = unsafe { &*((&t.inner.model) as *const LlamaModel) }
             .new_context(&t.inner.backend, ctx_params)?;
@@ -145,7 +144,7 @@ where
 
     fn load<P: AsRef<Path>>(ctx: Arc<LlamaBackend>, path: P, _view: bool) -> Result<Self> {
         let args: Args = serde_json::from_reader(File::open(path)?)?;
-        Llama::init(ctx, args.embed, args)
+        Llama::init(ctx, false, args)
     }
 }
 
@@ -250,5 +249,143 @@ where
             i: last_idx + 1,
             question_len: last_idx + 1,
         })
+    }
+}
+
+pub struct LlamaEmbed<Model> {
+    index: Index,
+    base: Llama<Model>,
+}
+
+fn index_options(dims: usize) -> IndexOptions {
+    let mut opts = IndexOptions::default();
+    opts.dimensions = dims;
+    opts.metric = MetricKind::Cos;
+    opts.quantization = ScalarKind::F32;
+    opts
+}
+
+impl<Model> LlamaEmbed<Model>
+where
+    Model: LlamaEmbedModel,
+{
+    fn init_with_index(
+        mut new_index: impl FnMut(usize) -> Result<Index>,
+        backend: Arc<LlamaBackend>,
+        args: Args,
+    ) -> Result<Self> {
+        let base = Llama::init(backend.clone(), true, args)?;
+        let index = new_index(base.inner.model.n_embd() as usize)?;
+        Ok(Self { index, base })
+    }
+
+    fn embed<'a, I: IntoIterator<Item = &'a str>>(&mut self, chunks: I) -> Result<Vec<Vec<f32>>> {
+        let n_ctx = self.base.inner.model.n_ctx_train() as usize;
+        let mut batch = LlamaBatch::new(n_ctx, 1);
+        let mut output = vec![];
+        let tokenized_chunks = chunks
+            .into_iter()
+            .map(|s| {
+                let tokens = self
+                    .base
+                    .inner
+                    .model
+                    .str_to_token(s, AddBos::Always)
+                    .map_err(anyhow::Error::from)?;
+                if tokens.len() > n_ctx {
+                    bail!(
+                        "chunk too large {} vs context windows of {n_ctx}",
+                        tokens.len()
+                    )
+                }
+                Ok(tokens)
+            })
+            .collect::<Result<Vec<Vec<LlamaToken>>>>()?;
+        for chunk in tokenized_chunks {
+            let seq = chunk.len() as i32;
+            for (i, token) in (0..).zip(chunk.iter()) {
+                batch.add(*token, i, &[0], i == seq - 1)?;
+            }
+            let ctx = self.base.inner.as_mut().ctx();
+            ctx.clear_kv_cache();
+            ctx.decode(&mut batch)
+                .with_context(|| "llama_decode() failed")?;
+            output.push(self.base.model.get_embedding(ctx, seq - 1)?);
+            batch.clear();
+        }
+        Ok(output)
+    }
+}
+
+impl<Model> Persistable for LlamaEmbed<Model>
+where
+    Model: LlamaEmbedModel,
+{
+    type Ctx = Arc<LlamaBackend>;
+
+    fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
+        Ok(serde_json::to_writer_pretty(
+            &mut fd,
+            &self.base.inner.args,
+        )?)
+    }
+
+    fn load<P: AsRef<Path>>(ctx: Arc<LlamaBackend>, path: P, view: bool) -> Result<Self> {
+        let args: Args = serde_json::from_reader(File::open(path.as_ref())?)?;
+        let new_index = |dims| -> Result<Index> {
+            let index = Index::new(&index_options(dims))?;
+            let mut path = PathBuf::from(path.as_ref());
+            path.set_extension("usearch");
+            let path = path.to_string_lossy();
+            if view {
+                index.view(&*path)?
+            } else {
+                index.load(&*path)?;
+            }
+            Ok(index)
+        };
+        Self::init_with_index(new_index, ctx, args)
+    }
+}
+
+impl<Model> EmbedModel for LlamaEmbed<Model>
+where
+    Model: LlamaEmbedModel,
+{
+    type Ctx = Arc<LlamaBackend>;
+    type Args = Args;
+    type EmbedPrompt = Model::EmbedPrompt;
+    type SearchPrompt = Model::SearchPrompt;
+
+    fn new(ctx: Arc<LlamaBackend>, args: Self::Args) -> Result<Self> {
+        Self::init_with_index(|dims| Ok(Index::new(&index_options(dims))?), ctx, args)
+    }
+
+    fn add(
+        &mut self,
+        summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,
+        text: &[(ChunkId, <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt)],
+    ) -> Result<()> {
+        let embed =
+            self.embed(iter::once(summary.as_ref()).chain(text.iter().map(|(_, t)| t.as_ref())))?;
+        let summary = embed[0].iter().map(|elt| *elt * 0.5).collect::<Vec<_>>();
+        let mut tmp = vec![];
+        for (e, (id, _)) in embed.into_iter().zip(text.iter()) {
+            tmp.clear();
+            tmp.extend(e.iter().zip(summary.iter()).map(|(elt, selt)| *elt + *selt));
+            l2_normalize(&mut tmp);
+            self.index.add(id.0, &tmp)?;
+        }
+        Ok(())
+    }
+
+    fn search(
+        &mut self,
+        q: <Self::SearchPrompt as FormattedPrompt>::FinalPrompt,
+        n: usize,
+    ) -> Result<usearch::ffi::Matches> {
+        let embed = self.embed(iter::once(q.as_ref()))?;
+        Ok(self.index.search(&embed[0], n)?)
     }
 }

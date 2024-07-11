@@ -114,15 +114,6 @@ impl GteQwen27BInstruct {
             _pin: PhantomPinned,
         });
         let n_ctx = t.model.n_ctx_train();
-        /*
-                #[cfg(vulkan)]
-                let ctx_params = LlamaContextParams::default()
-                    .with_n_threads_batch(32)
-                    .with_n_ctx(NonZero::new(n_ctx))
-                    .with_n_batch(n_ctx)
-                    .with_embeddings(true);
-                #[cfg(not(vulkan))]
-        */
         let ctx_params = LlamaContextParams::default()
             .with_n_threads_batch(available_parallelism()?.get() as u32)
             .with_n_ctx(NonZero::new(n_ctx))

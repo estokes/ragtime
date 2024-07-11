@@ -1,5 +1,6 @@
-use crate::session_from_model_file;
+use crate::simple_prompt::SimplePrompt;
 use crate::{doc::ChunkId, EmbedModel, Persistable};
+use crate::{session_from_model_file, FormattedPrompt};
 use anyhow::{anyhow, bail, Result};
 use ndarray::{s, Array2, Axis};
 use ort::{inputs, Session, SessionOutputs};
@@ -71,6 +72,8 @@ impl Persistable for BgeM3 {
 impl EmbedModel for BgeM3 {
     type Ctx = ();
     type Args = BgeArgs;
+    type EmbedPrompt = SimplePrompt;
+    type SearchPrompt = SimplePrompt;
 
     fn new(_ctx: (), params: Self::Args) -> Result<Self> {
         let (session, tokenizer) = session_from_model_file(&params.model, &params.tokenizer)?;
@@ -84,7 +87,11 @@ impl EmbedModel for BgeM3 {
         })
     }
 
-    fn add<S: AsRef<str>>(&mut self, _summary: S, text: &[(ChunkId, S)]) -> Result<()> {
+    fn add(
+        &mut self,
+        _summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,
+        text: &[(ChunkId, <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt)],
+    ) -> Result<()> {
         let embed = Self::embed(
             &self.tokenizer,
             &self.session,
@@ -99,7 +106,11 @@ impl EmbedModel for BgeM3 {
     }
 
     /// The keys component of Matches is a vec of ChunkIds represented as u64s.
-    fn search<S: AsRef<str>>(&mut self, text: S, n: usize) -> Result<Matches> {
+    fn search(
+        &mut self,
+        text: <Self::SearchPrompt as FormattedPrompt>::FinalPrompt,
+        n: usize,
+    ) -> Result<Matches> {
         let qembed = Self::embed(&self.tokenizer, &self.session, vec![text.as_ref()])?;
         let qembed = qembed["sentence_embedding"].try_extract_tensor::<f32>()?;
         let qembed = qembed.slice(s![0, ..]);

@@ -8,19 +8,25 @@ use std::path::PathBuf;
 
 fn test_encode() -> Result<()> {
     const BASE: &str = "/home/eric/proj/bge-m3/onnx";
-    let mut edb = BgeM3::new((), BgeArgs {
-        model: PathBuf::from(format!("{BASE}/model.onnx")),
-        tokenizer: PathBuf::from(format!("{BASE}/tokenizer.json")),
-    })?;
-    edb.add("", &[
-        (ChunkId::new(), "I've got a lovely bunch of coconuts"),
-        (ChunkId::new(), "I like coconuts very much"),
-        (
-            ChunkId::new(),
-            "A goomba is a character from super mario bros",
-        ),
-    ])?;
-    let m = edb.search("who here likes coconuts?", 3)?;
+    let mut edb = BgeM3::new(
+        (),
+        BgeArgs {
+            model: PathBuf::from(format!("{BASE}/model.onnx")),
+            tokenizer: PathBuf::from(format!("{BASE}/tokenizer.json")),
+        },
+    )?;
+    edb.add(
+        "".into(),
+        &[
+            (ChunkId::new(), "I've got a lovely bunch of coconuts".into()),
+            (ChunkId::new(), "I like coconuts very much".into()),
+            (
+                ChunkId::new(),
+                "A goomba is a character from super mario bros".into(),
+            ),
+        ],
+    )?;
+    let m = edb.search("who here likes coconuts?".into(), 3)?;
     println!("{m:?}");
     Ok(())
 }

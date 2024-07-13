@@ -10,7 +10,7 @@ use usearch::ffi::Matches;
 pub mod bge_m3;
 pub mod doc;
 pub mod gte_large_en;
-//pub mod gte_qwen2_7b_instruct;
+pub mod gte_qwen2_7b_instruct;
 pub mod llama;
 pub mod phi3;
 pub mod simple_prompt;

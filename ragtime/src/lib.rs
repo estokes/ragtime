@@ -258,3 +258,4 @@ where
 
 pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
 pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;
+pub type RagQaPhi3GteQwen27bInstruct = RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;

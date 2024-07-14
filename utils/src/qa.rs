@@ -2,9 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::{
-    gte_large_en::onnx::GteLargeEnArgs, llama, RagQaPhi3GteLargeEn,
-};
+use ragtime::{llama, RagQaPhi3GteQwen27bInstruct};
 use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
@@ -58,7 +56,7 @@ struct Args {
 }
 
 impl Args {
-    fn init(&self) -> Result<(bool, RagQaPhi3GteLargeEn)> {
+    fn init(&self) -> Result<(bool, RagQaPhi3GteQwen27bInstruct)> {
         tracing_subscriber::fmt::init();
         ort::init().commit()?;
         let backend = Arc::new({
@@ -70,7 +68,12 @@ impl Args {
         });
         if let Some(cp) = &self.checkpoint {
             let view = self.add_document.is_empty();
-            if let Ok(qa) = RagQaPhi3GteLargeEn::load((), Arc::clone(&backend), cp, view) {
+            if let Ok(qa) = RagQaPhi3GteQwen27bInstruct::load(
+                Arc::clone(&backend),
+                Arc::clone(&backend),
+                cp,
+                view,
+            ) {
                 return Ok((view, qa));
             }
         }
@@ -78,23 +81,19 @@ impl Args {
             .emb_model
             .as_ref()
             .ok_or_else(|| anyhow!("emb model is required"))?;
-        let emb_tokenizer = self
-            .emb_tokenizer
-            .as_ref()
-            .ok_or_else(|| anyhow!("emb tokenizer is required"))?;
         let qa_model = self
             .qa_model
             .as_ref()
             .ok_or_else(|| anyhow!("qa model is required"))?;
         let npar = available_parallelism()?.get() as u32;
         let threads = self.threads.unwrap_or_else(|| npar);
-        let qa = RagQaPhi3GteLargeEn::new(
+        let qa = RagQaPhi3GteQwen27bInstruct::new(
             self.max_mapped,
-            (),
-            GteLargeEnArgs {
-                model: emb_model.clone(),
-                tokenizer: emb_tokenizer.clone(),
-            },
+            backend.clone(),
+            llama::Args::default()
+                .with_threads(threads)
+                .with_seed(self.seed)
+                .with_model(emb_model.clone()),
             backend,
             llama::Args::default()
                 .with_threads(threads)

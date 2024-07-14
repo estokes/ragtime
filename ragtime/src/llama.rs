@@ -19,6 +19,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     thread::available_parallelism,
+    cmp::max
 };
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -280,7 +281,7 @@ where
     }
 
     fn embed<'a, I: IntoIterator<Item = &'a str>>(&mut self, chunks: I) -> Result<Vec<Vec<f32>>> {
-        let n_ctx = self.base.inner.model.n_ctx_train() as usize;
+        let n_ctx = self.base.inner.n_ctx as usize;
         let mut batch = LlamaBatch::new(n_ctx, 1);
         let mut output = vec![];
         let tokenized_chunks = chunks
@@ -371,10 +372,13 @@ where
             self.embed(iter::once(summary.as_ref()).chain(text.iter().map(|(_, t)| t.as_ref())))?;
         let summary = embed[0].iter().map(|elt| *elt * 0.5).collect::<Vec<_>>();
         let mut tmp = vec![];
-        for (e, (id, _)) in embed.into_iter().zip(text.iter()) {
+        for (e, (id, _)) in embed[1..].into_iter().zip(text.iter()) {
             tmp.clear();
             tmp.extend(e.iter().zip(summary.iter()).map(|(elt, selt)| *elt + *selt));
             l2_normalize(&mut tmp);
+            if self.index.capacity() == self.index.size() {
+                self.index.reserve(max(10, self.index.capacity() * 2))?;
+            }
             self.index.add(id.0, &tmp)?;
         }
         Ok(())

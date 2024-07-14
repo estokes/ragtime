@@ -1,7 +1,26 @@
 use crate::{
-    llama::{Llama, LlamaEmbedModel},
-    FormattedPrompt,
+    llama::{LlamaEmbed, LlamaEmbedModel}, FormattedPrompt
 };
+
+struct Writer<'a>(&'a mut String);
+
+impl<'a> std::fmt::Write for Writer<'a> {
+    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::fmt::Result {
+        self.0.write_fmt(args)
+    }
+
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.write_str(s)
+    }
+
+    fn write_char(&mut self, c: char) -> std::fmt::Result {
+        self.0.write_char(c)
+    }
+}
+
+impl<'a> Drop for Writer<'a> {
+    fn drop(&mut self) {}
+}
 
 #[derive(Debug)]
 pub struct GteFinalEmbedPrompt(String);
@@ -18,11 +37,11 @@ impl FormattedPrompt for GteEmbedPrompt {
     type FinalPrompt = GteFinalEmbedPrompt;
 
     fn system<'a>(&'a mut self) -> impl std::fmt::Write + 'a {
-        &mut self.0
+        Writer(&mut self.0)
     }
 
     fn user<'a>(&'a mut self) -> impl std::fmt::Write + 'a {
-        &mut self.0
+        Writer(&mut self.0)
     }
 
     fn finalize(self) -> anyhow::Result<Self::FinalPrompt> {
@@ -57,7 +76,7 @@ impl FormattedPrompt for GteSearchPrompt {
     type FinalPrompt = GteFinalSearchPrompt;
 
     fn system<'a>(&'a mut self) -> impl std::fmt::Write + 'a {
-        &mut self.0
+        Writer(&mut self.0)
     }
 
     fn user<'a>(&'a mut self) -> impl std::fmt::Write + 'a {
@@ -65,7 +84,7 @@ impl FormattedPrompt for GteSearchPrompt {
         const TASK: &str =
             "Given a web search query, retrieve relevant passages that answer the query";
         write!(&mut self.0, "Instruct: {TASK}\nQuery: ").unwrap();
-        &mut self.0
+        Writer(&mut self.0)
     }
 
     fn finalize(self) -> anyhow::Result<Self::FinalPrompt> {
@@ -101,4 +120,4 @@ impl LlamaEmbedModel for GteQwen27bInstructModel {
     }
 }
 
-pub type GteQwen27bInstruct = Llama<GteQwen27bInstructModel>;
+pub type GteQwen27bInstruct = LlamaEmbed<GteQwen27bInstructModel>;

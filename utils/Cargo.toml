@@ -14,9 +14,9 @@ vulkan = ["ragtime/vulkan"]
 native = ["ragtime/native"]
 cuda = ["ragtime/cuda"]
 
-[[bin]]
-name = "encode"
-path = "src/encode.rs"
+#[[bin]]
+#name = "embed"
+#path = "src/embed.rs"
 
 [[bin]]
 name = "chunk"

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
+    cmp::max
 };
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
@@ -100,6 +101,9 @@ impl EmbedModel for BgeM3 {
         let embed = embed["sentence_embedding"].try_extract_tensor::<f32>()?;
         for (e, (id, _)) in embed.axis_iter(Axis(0)).zip(text.iter()) {
             let d = e.as_slice().ok_or_else(|| anyhow!("could not get slice"))?;
+            if self.index.capacity() == self.index.size() {
+                self.index.reserve(max(10, self.index.capacity() * 2))?;
+            }
             self.index.add(id.0, d)?
         }
         Ok(())

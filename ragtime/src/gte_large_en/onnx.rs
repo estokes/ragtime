@@ -10,6 +10,7 @@ use std::{
     fs::{File, OpenOptions},
     iter,
     path::{Path, PathBuf},
+    cmp::max,
 };
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
@@ -111,6 +112,9 @@ impl EmbedModel for GteLargeEn {
                 tmp.as_slice_mut()
                     .ok_or_else(|| anyhow!("could not get embedding"))?,
             );
+            if self.index.capacity() == self.index.size() {
+                self.index.reserve(max(10, self.index.capacity() * 2))?;
+            }
             self.index.add(id.0, tmp.as_slice().unwrap())?
         }
         Ok(())

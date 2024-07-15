@@ -11,6 +11,7 @@ use llama_cpp_2::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::max,
     fs::{File, OpenOptions},
     iter,
     marker::PhantomPinned,
@@ -19,7 +20,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     thread::available_parallelism,
-    cmp::max
 };
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -325,11 +325,12 @@ where
     type Ctx = Arc<LlamaBackend>;
 
     fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let mut path = PathBuf::from(path.as_ref());
+        path.set_extension("json");
         let mut fd = OpenOptions::new().create(true).write(true).open(&path)?;
-        Ok(serde_json::to_writer_pretty(
-            &mut fd,
-            &self.base.inner.args,
-        )?)
+        serde_json::to_writer_pretty(&mut fd, &self.base.inner.args)?;
+        path.set_extension("usearch");
+        Ok(self.index.save(&*path.to_string_lossy())?)
     }
 
     fn load<P: AsRef<Path>>(ctx: Arc<LlamaBackend>, path: P, view: bool) -> Result<Self> {

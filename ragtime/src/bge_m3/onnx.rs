@@ -1,14 +1,15 @@
-use crate::simple_prompt::SimplePrompt;
-use crate::{doc::ChunkId, EmbedModel, Persistable};
-use crate::{session_from_model_file, FormattedPrompt};
+use crate::{
+    doc::ChunkId, session_from_model_file, simple_prompt::SimplePrompt, EmbedModel,
+    FormattedPrompt, Persistable,
+};
 use anyhow::{anyhow, bail, Result};
 use ndarray::{s, Array2, Axis};
 use ort::{inputs, Session, SessionOutputs};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::max,
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
-    cmp::max
 };
 use tokenizers::Tokenizer;
 use usearch::{ffi::Matches, Index, IndexOptions, MetricKind, ScalarKind};
@@ -130,7 +131,7 @@ impl BgeM3 {
         tokenizer: &Tokenizer,
         session: &'a Session,
         text: Vec<&str>,
-    ) -> Result<SessionOutputs<'a>> {
+    ) -> Result<SessionOutputs<'a, 'a>> {
         if text.len() == 0 {
             bail!("can't add an empty batch")
         }

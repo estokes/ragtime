@@ -42,6 +42,7 @@ pub struct Args {
     pub threads: u32,
     pub ctx_divisor: u32,
     pub seed: u32,
+    pub gpu_layers: u32,
 }
 
 impl Default for Args {
@@ -51,6 +52,7 @@ impl Default for Args {
             threads: available_parallelism().map(|n| n.get() as u32).unwrap_or(8),
             ctx_divisor: 1,
             seed: 42,
+            gpu_layers: 9999,
         }
     }
 }
@@ -73,6 +75,11 @@ impl Args {
 
     pub fn with_seed(mut self, seed: u32) -> Self {
         self.seed = seed;
+        self
+    }
+
+    pub fn with_gpu_layers(mut self, layers: u32) -> Self {
+        self.gpu_layers = layers;
         self
     }
 }
@@ -102,7 +109,7 @@ where
     Model: Default,
 {
     fn init(ctx: Arc<LlamaBackend>, embed: bool, args: Args) -> Result<Self> {
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(args.gpu_layers);
         let model = LlamaModel::load_from_file(&ctx, &args.model, &model_params)?;
         let n_ctx = model.n_ctx_train() / args.ctx_divisor;
         let mut t = Llama {

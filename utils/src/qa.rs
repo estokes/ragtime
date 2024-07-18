@@ -17,6 +17,10 @@ struct Args {
     emb_model: Option<PathBuf>,
     #[arg(long, help = "path to the embedding tokenizer (e.g. tokenizer.json)")]
     emb_tokenizer: Option<PathBuf>,
+    #[arg(long, help = "the number of gpu layers to use for the embedding model (1000)", default_value = "1000")]
+    emb_gpu_layers: u32,
+    #[arg(long, help = "the number of gpu layers to use for the qa model (1000)", default_value = "1000")]
+    qa_gpu_layers: u32,
     #[arg(long, help = "path to the QA model (gguf)")]
     qa_model: Option<PathBuf>,
     #[arg(long, help = "the number of threads to use (default: all available)")]
@@ -93,13 +97,15 @@ impl Args {
             llama::Args::default()
                 .with_threads(threads)
                 .with_seed(self.seed)
-                .with_model(emb_model.clone()),
+                .with_model(emb_model.clone())
+                .with_gpu_layers(self.emb_gpu_layers),
             backend,
             llama::Args::default()
                 .with_threads(threads)
                 .with_ctx_divisor(self.ctx_divisor)
                 .with_seed(self.seed)
-                .with_model(qa_model.clone()),
+                .with_model(qa_model.clone())
+                .with_gpu_layers(self.qa_gpu_layers),
         )?;
         Ok((false, qa))
     }

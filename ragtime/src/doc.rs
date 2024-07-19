@@ -143,6 +143,13 @@ impl Doc {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DocRef<'a> {
+    pub path: &'a Path,
+    pub summary: &'a str,
+    pub text: &'a str,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Chunk {
     id: ChunkId,
@@ -283,13 +290,20 @@ impl DocStore {
     }
 
     /// Get the text of a chunk and the summary of the document it came from. (summary, chunk_text)
-    pub fn get<'a>(&'a self, chunk: &Chunk) -> Result<(&'a str, &'a str)> {
+    pub fn get<'a>(&'a self, chunk: &Chunk) -> Result<DocRef<'a>> {
         let doc = self
             .mapped
             .get(&chunk.doc)
             .ok_or_else(|| anyhow!("document isn't loaded"))?;
         let text = doc.get(chunk)?;
-        let summary = self.summary.get(&chunk.doc).ok_or_else(|| anyhow!("no summary"))?;
-        Ok((summary, text))
+        let summary = self
+            .summary
+            .get(&chunk.doc)
+            .ok_or_else(|| anyhow!("no summary"))?;
+        Ok(DocRef {
+            summary,
+            text,
+            path: &doc.path,
+        })
     }
 }

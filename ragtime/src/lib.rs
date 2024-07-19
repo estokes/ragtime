@@ -3,7 +3,13 @@ use anyhow::{anyhow, bail, Result};
 use compact_str::CompactString;
 use ort::Session;
 use smallvec::SmallVec;
-use std::{cmp::min, fmt::Debug, fs, path::Path, thread::available_parallelism};
+use std::{
+    cmp::min,
+    fmt::Debug,
+    fs,
+    path::{Path, PathBuf},
+    thread::available_parallelism,
+};
 use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
@@ -87,6 +93,7 @@ pub trait QaModel: Sized {
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub distance: f32,
+    pub path: PathBuf,
     pub summary: String,
     pub text: String,
 }
@@ -211,10 +218,11 @@ where
                 for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
                     if *dist <= 0.7 {
                         let chunk = self.docs.get_chunk(*id)?;
-                        let (summary, text) = self.docs.get(&chunk)?;
+                        let doc = self.docs.get(&chunk)?;
                         write!(
                             dst,
-                            "Document Summary\n{summary}\n\nDocument Section\n{text}\n\n"
+                            "Document Path {:?}\nDocument Summary\n{}\n\nDocument Section\n{}\n\n",
+                            doc.path, doc.summary, doc.text
                         )?;
                     }
                 }
@@ -245,11 +253,12 @@ where
             .zip(matches.distances.iter())
             .map(|(id, dist)| {
                 let chunk = self.docs.get_chunk(*id)?;
-                let (summary, text) = self.docs.get(&chunk)?;
+                let doc = self.docs.get(&chunk)?;
                 Ok(SearchResult {
                     distance: *dist,
-                    summary: summary.to_string(),
-                    text: text.to_string(),
+                    path: doc.path.to_owned(),
+                    summary: doc.summary.to_string(),
+                    text: doc.text.to_string(),
                 })
             })
             .collect::<Result<_>>()
@@ -258,4 +267,5 @@ where
 
 pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
 pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;
-pub type RagQaPhi3GteQwen27bInstruct = RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;
+pub type RagQaPhi3GteQwen27bInstruct =
+    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;

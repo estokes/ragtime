@@ -1,11 +1,10 @@
 # Ragtime
 
-Ragtime is a rust library that intends to make self hosted retrieval
-augmented generation (RAG) applications easier to deploy and
-use. Currently it uses Phi3 for question answering and summarizing,
-and supports multiple embedding models. It has a generic model
-interface to facilitate integrating additional models as they become
-available.
+Ragtime is a rust library that makes building self hosted retrieval
+augmented generation (RAG) applications easier. Currently it uses Phi3
+for question answering and summarizing, and supports multiple
+embedding models. It has a generic model interface to facilitate
+integrating additional models as they become available.
 
 Currently onnx and llama.cpp backends are supported for running
 models, additional backends (such as burn or candle) may be added as

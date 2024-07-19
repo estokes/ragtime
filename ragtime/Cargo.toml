@@ -1,5 +1,13 @@
 [package]
 name = "ragtime"
+authors = ["Eric Stokes <eestokes@pm.me>"]
+license = "MIT"
+repository = "https://github.com/estokes/ragtime"
+description = "Easy Retrieval Augmented Generation"
+documentation = "https://docs.rs/ragtime"
+readme = "../README.md"
+keywords = ["ai", "rag", "phi3"]
+categories = ["text-processing"]
 version = "0.1.0"
 edition = "2021"
 

@@ -69,6 +69,9 @@ llama.cpp repository. In the case of onnx models, many are available
 for direct download from hugging face, otherwise you will have to
 convert them from hugging face format.
 
+- Phi3: https://huggingface.co/microsoft/Phi-3-mini-128k-instruct
+- gte-Qwen2: https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct
+
 ## Deployment
 
 Ragtime applications can be deployed with minimal dependencies if

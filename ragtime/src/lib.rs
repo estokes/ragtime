@@ -98,6 +98,38 @@ pub struct SearchResult {
     pub text: String,
 }
 
+/** RagQa encapsulates the RAG workflow into a simple api that makes
+the core operations single method calls.
+
+```no_run
+use ragtime::{llama, RagQaPhi3GteQwen27bInstruct};
+use llama_cpp_2::llama_backend::LlamaBackend;
+use anyhow::Result;
+use std::{io::{stdout, Write}, sync::Arc};
+# fn main() -> Result<()> {
+let backend = Arc::new(LlamaBackend::init()?);
+let mut qa = RagQaPhi3GteQwen27bInstruct::new(
+    64,
+    backend.clone(),
+    llama::Args::default().with_model("gte-Qwen2-7B-instruct/ggml-model-q8_0.gguf"),
+    backend,
+    llama::Args::default().with_model("Phi-3-mini-128k-instruct/ggml-model-q8_0.gguf")
+)?;
+
+// add documents
+qa.add_document("doc0", 256, 128)?;
+qa.add_document("doc1", 256, 128)?;
+
+// query
+for tok in qa.ask("question about your docs", None)? {
+    let tok = tok?;
+    print!("{tok}");
+    stdout().flush()?;
+}
+# Ok(())
+# }
+```
+**/
 pub struct RagQa<E, Q> {
     docs: DocStore,
     db: E,

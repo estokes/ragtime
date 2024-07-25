@@ -146,7 +146,7 @@ impl Doc {
 #[derive(Debug, Clone, Copy)]
 pub struct DocRef<'a> {
     pub path: &'a Path,
-    pub summary: &'a str,
+    pub summary: Option<&'a str>,
     pub text: &'a str,
 }
 
@@ -160,7 +160,7 @@ pub struct Chunk {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Saved {
-    docs: Vec<(DocId, PathBuf, String)>,
+    docs: Vec<(DocId, PathBuf, Option<String>)>,
     chunks: Vec<Chunk>,
     next_docid: u64,
     next_chunkid: u64,
@@ -199,7 +199,7 @@ impl DocStore {
         let docs = self
             .by_path
             .iter()
-            .map(|(p, id)| (*id, p.clone(), self.summary[id].clone()))
+            .map(|(p, id)| (*id, p.clone(), self.summary.get(id).cloned()))
             .collect();
         let chunks = self.chunks.iter().map(|(_, c)| *c).collect();
         let saved = Saved {
@@ -217,7 +217,9 @@ impl DocStore {
         let mut t = Self::new(saved.max_mapped);
         for (id, path, summary) in saved.docs {
             t.unmapped.insert(id, path.clone());
-            t.summary.insert(id, summary);
+            if let Some(summary) = summary {
+                t.summary.insert(id, summary);
+            }
             t.by_path.insert(path, id);
         }
         for chunk in saved.chunks {
@@ -242,7 +244,7 @@ impl DocStore {
     pub fn add_document<'a, P: AsRef<Path>, S: AsRef<str>>(
         &'a mut self,
         path: P,
-        summary: S,
+        summary: Option<S>,
         chunk_size: usize,
         overlap: usize,
     ) -> Result<impl Iterator<Item = Result<(ChunkId, &'a str)>> + 'a> {
@@ -253,7 +255,9 @@ impl DocStore {
         };
         let chunks = &mut self.chunks;
         let mapped = &mut self.mapped;
-        self.summary.insert(id, summary.as_ref().into());
+        if let Some(summary) = summary {
+            self.summary.insert(id, summary.as_ref().into());
+        }
         mapped.insert(id, Doc::new(id, path)?);
         let doc = &mapped[&id];
         Ok(doc.chunks(chunk_size, overlap)?.map(move |chunk| {
@@ -296,10 +300,7 @@ impl DocStore {
             .get(&chunk.doc)
             .ok_or_else(|| anyhow!("document isn't loaded"))?;
         let text = doc.get(chunk)?;
-        let summary = self
-            .summary
-            .get(&chunk.doc)
-            .ok_or_else(|| anyhow!("no summary"))?;
+        let summary = self.summary.get(&chunk.doc).map(|s| s.as_str());
         Ok(DocRef {
             summary,
             text,

@@ -94,7 +94,7 @@ pub trait QaModel: Sized {
 pub struct SearchResult {
     pub distance: f32,
     pub path: PathBuf,
-    pub summary: String,
+    pub summary: Option<String>,
     pub text: String,
 }
 
@@ -202,23 +202,23 @@ where
     ) -> Result<()> {
         use std::fmt::Write;
         let summary = {
-            let mut summary = String::new();
             let txt = fs::read_to_string(doc.as_ref())?;
             if txt.len() >= 512 {
+                let mut summary = String::new();
                 let mut prompt = Q::Prompt::new();
                 write!(prompt.system(), "Please produce a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
                 write!(prompt.user(), "{}", txt)?;
                 for tok in self.qa.ask(prompt.finalize()?, None)? {
                     summary.push_str(&tok?);
                 }
+                Some(summary)
             } else {
-                summary.push_str("this text is too short to summarize");
+                None
             }
-            summary
         };
         let chunks = self
             .docs
-            .add_document(doc, &summary, chunk_size, overlap)?
+            .add_document(doc, summary.as_ref(), chunk_size, overlap)?
             .map(|r| {
                 r.and_then(|(id, s)| {
                     let mut prompt = E::EmbedPrompt::new();
@@ -228,7 +228,9 @@ where
             })
             .collect::<Result<SmallVec<[_; 128]>>>()?;
         let mut p = E::EmbedPrompt::new();
-        write!(p.user(), "{summary}")?;
+        if let Some(summary) = summary {
+            write!(p.user(), "{summary}")?;
+        }
         self.db.add(p.finalize()?, &chunks)?;
         Ok(())
     }
@@ -251,11 +253,11 @@ where
                     if *dist <= 0.7 {
                         let chunk = self.docs.get_chunk(*id)?;
                         let doc = self.docs.get(&chunk)?;
-                        write!(
-                            dst,
-                            "Document Path {:?}\nDocument Summary\n{}\n\nDocument Section\n{}\n\n",
-                            doc.path, doc.summary, doc.text
-                        )?;
+                        write!(dst, "Document Path {:?}\n", doc.path)?;
+                        if let Some(summary) = doc.summary.as_ref() {
+                            write!(dst, "Document Summary\n{}\n", summary)?;
+                        }
+                        write!(dst, "Document Section\n{}\n\n", doc.text)?;
                     }
                 }
             }
@@ -289,7 +291,7 @@ where
                 Ok(SearchResult {
                     distance: *dist,
                     path: doc.path.to_owned(),
-                    summary: doc.summary.to_string(),
+                    summary: doc.summary.map(|s| s.to_string()),
                     text: doc.text.to_string(),
                 })
             })

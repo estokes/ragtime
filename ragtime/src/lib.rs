@@ -20,6 +20,7 @@ pub mod gte_qwen2_7b_instruct;
 pub mod llama;
 pub mod phi3;
 pub mod simple_prompt;
+pub mod general_decoder;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -38,6 +39,21 @@ fn l2_normalize(input: &mut [f32]) {
     for val in input {
         *val /= magnitude;
     }
+}
+
+pub trait DecodedFile: Clone + Debug {
+    fn decoded_path(&self) -> &Path;
+    fn original_path(&self) -> &Path;
+}
+
+pub trait FileDecoder: Debug {
+    type TmpFile: DecodedFile;
+
+    /// decode must determine if the file is plain text, and if not it must decode the file to plain text.
+    /// If it can't be decoded, it should return an error. Otherwise it must return a `TmpFile`, which will be held
+    /// by the system until the file is no longer needed. Decode may be called multiple times for the same file,
+    /// the decoder should only clean up it's `TmpFile` when every reference to that file has been dropped.
+    fn decode<P: AsRef<Path>>(&mut self, path: P) -> Result<Self::TmpFile>;
 }
 
 pub trait Persistable: Sized {
@@ -130,16 +146,17 @@ for tok in qa.ask("question about your docs", None)? {
 # }
 ```
 **/
-pub struct RagQa<E, Q> {
-    docs: DocStore,
+pub struct RagQa<E, Q, D: FileDecoder> {
+    docs: DocStore<D>,
     db: E,
     qa: Q,
 }
 
-impl<E, Q> RagQa<E, Q>
+impl<E, Q, D> RagQa<E, Q, D>
 where
     E: Persistable,
     Q: Persistable,
+    D: FileDecoder,
 {
     /// save the state to the specified directory, which will be
     /// created if it does not exist.
@@ -160,6 +177,7 @@ where
 
     /// load the state from the specified directory
     pub fn load<P: AsRef<Path>>(
+        decoder: D,
         embed_ctx: E::Ctx,
         qa_ctx: Q::Ctx,
         path: P,
@@ -169,28 +187,21 @@ where
         if !path.is_dir() {
             bail!("save directory could not be found")
         }
-        let docs = DocStore::load(path.join("docs.json"))?;
+        let docs = DocStore::load(decoder, path.join("docs.json"))?;
         let db = E::load(embed_ctx, path.join("db.json"), view)?;
         let qa = Q::load(qa_ctx, path.join("model.json"), view)?;
         Ok(Self { docs, db, qa })
     }
 }
 
-impl<E, Q> RagQa<E, Q>
+impl<E, Q, D> RagQa<E, Q, D>
 where
     E: EmbedModel,
     Q: QaModel,
+    D: FileDecoder,
 {
-    pub fn new(
-        max_mapped: usize,
-        embed_ctx: E::Ctx,
-        embed_args: E::Args,
-        qa_ctx: Q::Ctx,
-        qa_args: Q::Args,
-    ) -> Result<Self> {
-        let docs = DocStore::new(max_mapped);
-        let db = E::new(embed_ctx, embed_args)?;
-        let qa = Q::new(qa_ctx, qa_args)?;
+    pub fn new(decoder: D, max_mapped: usize, db: E, qa: Q) -> Result<Self> {
+        let docs = DocStore::new(decoder, max_mapped);
         Ok(Self { docs, db, qa })
     }
 
@@ -201,12 +212,13 @@ where
         overlap: usize,
     ) -> Result<()> {
         use std::fmt::Write;
+        let decoded = self.docs.decoder().decode(doc.as_ref())?;
         let summary = {
-            let txt = fs::read_to_string(doc.as_ref())?;
+            let txt = fs::read_to_string(decoded.decoded_path())?;
             if txt.len() >= 512 {
                 let mut summary = String::new();
                 let mut prompt = Q::Prompt::new();
-                write!(prompt.system(), "Please produce a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
+                write!(prompt.system(), "Please write a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
                 write!(prompt.user(), "{}", txt)?;
                 for tok in self.qa.ask(prompt.finalize()?, None)? {
                     summary.push_str(&tok?);
@@ -237,7 +249,7 @@ where
 
     fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as FormattedPrompt>::FinalPrompt> {
         use std::fmt::Write;
-        let mut prompt = Q::Prompt::with_capacity(min(4 * 1024 * 1024, q.len() * 10));
+        let mut prompt = Q::Prompt::with_capacity(min(128 * 1024, q.len() * 10));
         let mut sprompt = E::SearchPrompt::new();
         write!(sprompt.user(), "{q}")?;
         let matches = self.db.search(sprompt.finalize()?, 3)?;
@@ -253,7 +265,7 @@ where
                     if *dist <= 0.7 {
                         let chunk = self.docs.get_chunk(*id)?;
                         let doc = self.docs.get(&chunk)?;
-                        write!(dst, "Document Path {:?}\n", doc.path)?;
+                        write!(dst, "Document Path {:?}\n", doc.original_path)?;
                         if let Some(summary) = doc.summary.as_ref() {
                             write!(dst, "Document Summary\n{}\n", summary)?;
                         }
@@ -290,7 +302,7 @@ where
                 let doc = self.docs.get(&chunk)?;
                 Ok(SearchResult {
                     distance: *dist,
-                    path: doc.path.to_owned(),
+                    path: doc.original_path.to_owned(),
                     summary: doc.summary.map(|s| s.to_string()),
                     text: doc.text.to_string(),
                 })
@@ -299,7 +311,7 @@ where
     }
 }
 
-pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
-pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;
-pub type RagQaPhi3GteQwen27bInstruct =
-    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;
+pub type RagQaPhi3BgeM3<D> = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3, D>;
+pub type RagQaPhi3GteLargeEn<D> = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3, D>;
+pub type RagQaPhi3GteQwen27bInstruct<D> =
+    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3, D>;

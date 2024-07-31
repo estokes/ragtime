@@ -1,4 +1,5 @@
 /// Document handling
+use crate::{DecodedFile, FileDecoder};
 use anyhow::{anyhow, bail, Ok, Result};
 use chrono::prelude::*;
 use fxhash::{FxBuildHasher, FxHashMap};
@@ -95,20 +96,23 @@ impl<'a> Iterator for ChunkIter<'a> {
 }
 
 #[derive(Debug)]
-struct Doc {
-    path: PathBuf,
+struct Doc<D: FileDecoder> {
+    decoded: D::TmpFile,
     id: DocId,
     _file: File,
     map: Mmap,
     last_used: DateTime<Utc>,
 }
 
-impl Doc {
-    fn new(id: DocId, path: PathBuf) -> Result<Self> {
-        let file = File::open(&path)?;
+impl<D> Doc<D>
+where
+    D: FileDecoder,
+{
+    fn new(id: DocId, decoded: D::TmpFile) -> Result<Self> {
+        let file = File::open(decoded.decoded_path())?;
         let map = unsafe { Mmap::map(&file)? };
         Ok(Self {
-            path,
+            decoded,
             id,
             _file: file,
             map,
@@ -145,7 +149,8 @@ impl Doc {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DocRef<'a> {
-    pub path: &'a Path,
+    pub original_path: &'a Path,
+    pub decoded_path: &'a Path,
     pub summary: Option<&'a str>,
     pub text: &'a str,
 }
@@ -168,17 +173,21 @@ struct Saved {
 }
 
 #[derive(Debug)]
-pub struct DocStore {
-    mapped: IndexMap<DocId, Doc, FxBuildHasher>,
+pub struct DocStore<D: FileDecoder> {
+    mapped: IndexMap<DocId, Doc<D>, FxBuildHasher>,
     unmapped: FxHashMap<DocId, PathBuf>,
     summary: FxHashMap<DocId, String>,
     by_path: FxHashMap<PathBuf, DocId>,
     chunks: FxHashMap<ChunkId, Chunk>,
     max_mapped: usize,
+    decoder: D,
 }
 
-impl DocStore {
-    pub fn new(max_mapped: usize) -> Self {
+impl<D> DocStore<D>
+where
+    D: FileDecoder,
+{
+    pub fn new(decoder: D, max_mapped: usize) -> Self {
         Self {
             mapped: IndexMap::default(),
             unmapped: HashMap::default(),
@@ -186,6 +195,7 @@ impl DocStore {
             by_path: HashMap::default(),
             chunks: HashMap::default(),
             max_mapped,
+            decoder,
         }
     }
 
@@ -193,6 +203,7 @@ impl DocStore {
         let mut fd = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(path.as_ref())?;
         let next_docid = NEXT_DOCID.load(Ordering::Relaxed);
         let next_chunkid = NEXT_CHUNKID.load(Ordering::Relaxed);
@@ -212,9 +223,9 @@ impl DocStore {
         Ok(serde_json::to_writer_pretty(&mut fd, &saved)?)
     }
 
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(decoder: D, path: P) -> Result<Self> {
         let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
-        let mut t = Self::new(saved.max_mapped);
+        let mut t = Self::new(decoder, saved.max_mapped);
         for (id, path, summary) in saved.docs {
             t.unmapped.insert(id, path.clone());
             if let Some(summary) = summary {
@@ -248,17 +259,17 @@ impl DocStore {
         chunk_size: usize,
         overlap: usize,
     ) -> Result<impl Iterator<Item = Result<(ChunkId, &'a str)>> + 'a> {
-        let path = PathBuf::from(path.as_ref());
-        let id = match self.by_path.entry(path.clone()) {
+        let decoded = self.decoder.decode(path.as_ref())?;
+        let id = match self.by_path.entry(PathBuf::from(path.as_ref())) {
             Entry::Vacant(e) => *e.insert(DocId::new()),
-            Entry::Occupied(_) => bail!("document {path:?} already loaded"),
+            Entry::Occupied(_) => bail!("document {:?} already loaded", path.as_ref()),
         };
         let chunks = &mut self.chunks;
         let mapped = &mut self.mapped;
         if let Some(summary) = summary {
             self.summary.insert(id, summary.as_ref().into());
         }
-        mapped.insert(id, Doc::new(id, path)?);
+        mapped.insert(id, Doc::new(id, decoded)?);
         let doc = &mapped[&id];
         Ok(doc.chunks(chunk_size, overlap)?.map(move |chunk| {
             chunks.insert(chunk.id, chunk);
@@ -275,10 +286,13 @@ impl DocStore {
             Some(doc) => {
                 doc.last_used = Utc::now();
             }
-            None => match self.unmapped.remove(&chunk.doc) {
+            None => match self.unmapped.get(&chunk.doc) {
                 None => bail!("no document for chunk {id}"),
                 Some(path) => {
-                    self.mapped.insert(chunk.doc, Doc::new(chunk.doc, path)?);
+                    let decoded = self.decoder.decode(path)?;
+                    let doc = Doc::new(chunk.doc, decoded)?;
+                    self.unmapped.remove(&chunk.doc);
+                    self.mapped.insert(chunk.doc, doc);
                 }
             },
         }
@@ -287,7 +301,7 @@ impl DocStore {
                 .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
             while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
                 let (id, doc) = self.mapped.pop().unwrap();
-                self.unmapped.insert(id, doc.path);
+                self.unmapped.insert(id, doc.decoded.original_path().to_path_buf());
             }
         }
         Ok(chunk)
@@ -304,7 +318,12 @@ impl DocStore {
         Ok(DocRef {
             summary,
             text,
-            path: &doc.path,
+            original_path: doc.decoded.original_path(),
+            decoded_path: doc.decoded.decoded_path(),
         })
+    }
+
+    pub(crate) fn decoder(&mut self) -> &mut D {
+        &mut self.decoder
     }
 }

@@ -35,3 +35,6 @@ encoding_rs = { workspace = true }
 compact_str = { workspace = true }
 tracing = { workspace = true }
 smallvec = { workspace = true }
+regex = { workspace = true }
+fs3 = { workspace = true }
+infer = { workspace = true }

@@ -38,3 +38,4 @@ smallvec = { workspace = true }
 regex = { workspace = true }
 fs3 = { workspace = true }
 infer = { workspace = true }
+tempfile = { workspace = true }

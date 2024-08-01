@@ -27,6 +27,7 @@ smallvec = {version = "1", features = ["union", "const_generics"]}
 regex = "1"
 fs3 = "0.5"
 infer = "0.16"
+tempfile = "3"
 
 [workspace]
 resolver = "2"

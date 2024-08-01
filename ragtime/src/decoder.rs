@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Result};
+use compact_str::CompactString;
 use core::fmt;
 use fs3::FileExt;
 use fxhash::FxHashMap;
+use infer::{Infer, Matcher};
 use regex::bytes::Regex;
 use std::{
     fs::{self, File},
@@ -47,6 +49,7 @@ pub struct Decoder {
     next_id: u64,
     lock_file: File,
     tmp_file_regex: Regex,
+    infer: Infer,
 }
 
 impl fmt::Debug for Decoder {
@@ -91,6 +94,20 @@ impl Decoder {
         self.decoders.insert(mime_type, decoder);
     }
 
+    /// Add a custom matcher to determine the mime type of a file.
+    /// The infer library will be tried first when trying to determine the
+    /// mime type of a file. On unix systems, the `file` command will be tried
+    /// if the infer library does not find a match. On windows systems it will
+    /// assume text/plain for unknown file types.
+    pub fn add_mime_inferer(
+        &mut self,
+        mime: &'static str,
+        extension: &'static str,
+        matcher: Matcher,
+    ) {
+        self.infer.add(mime, extension, matcher)
+    }
+
     pub fn new<S: AsRef<Path>>(tmpdir: S) -> Result<Self> {
         let tmpdir = tmpdir.as_ref().to_path_buf();
         let lock_file = File::create(tmpdir.join(".gdlock"))?;
@@ -104,6 +121,7 @@ impl Decoder {
             next_id: 0,
             lock_file,
             tmp_file_regex,
+            infer: Infer::new(),
         };
         t.cleanup()?;
         Ok(t)
@@ -117,12 +135,10 @@ impl Decoder {
             }
         }
         let decoded_path = self.tmpdir.join(format!("gd{}", self.next_id));
-        let typ = infer::get_from_path(path)?
-            .ok_or_else(|| anyhow!("unknown mime type"))?
-            .mime_type();
-        match self.decoders.get_mut(typ) {
+        let typ = infer_from_path(&self.infer, path)?;
+        match self.decoders.get_mut(&*typ) {
             Some(decoder) => decoder(path, &decoded_path)?,
-            None => generic_decode(typ, path, &decoded_path)?,
+            None => generic_decode(&self.infer, &typ, path, &decoded_path)?,
         }
         let decoded = Arc::new(DecodedInner {
             original_path: path.to_path_buf(),
@@ -144,29 +160,80 @@ impl Decoder {
     }
 }
 
+fn infer_from_path<P: AsRef<Path>>(infer: &Infer, path: P) -> Result<CompactString> {
+    let path = path.as_ref();
+    let typ = infer
+        .get_from_path(path)?
+        .map(|t| CompactString::from(t.mime_type()));
+    match typ {
+        Some(typ) => Ok(typ),
+        None => {
+            if cfg!(unix) {
+                use std::process::Command;
+                let out = Command::new("file")
+                    .arg("-b")
+                    .arg("--mime-type")
+                    .arg(path)
+                    .output()?;
+                Ok(CompactString::from_utf8_lossy(out.stdout.trim_ascii()))
+            } else {
+                Ok(CompactString::from("text/plain"))
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
 fn loconvert(ext: &str, path: &Path, decoded_path: &Path) -> Result<()> {
     use std::process::Command;
+    use tempfile::tempdir;
     let name = path.file_name().ok_or_else(|| anyhow!("no file name"))?;
-    let outfile = PathBuf::from("/tmp")
+    let dir = tempdir()?;
+    fs::copy(path, dir.path().join(name))?;
+    let outfile = dir
+        .path()
         .join(name)
         .with_extension(ext.split_once(":").map(|(s, _)| s).unwrap_or(ext));
-    let mut cmd = Command::new("libreoffice");
-    cmd.arg("--convert-to")
+    Command::new("libreoffice")
+        .arg("--convert-to")
         .arg(ext)
         .arg(path)
         .arg("--outdir")
-        .arg("/tmp")
+        .arg(dir.path())
         .status()?;
     fs::copy(&outfile, decoded_path)?;
-    fs::remove_file(&outfile)?;
     Ok(())
 }
 
 #[cfg(unix)]
-fn generic_decode(typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
+fn uncompress(infer: &Infer, cmd: &str, path: &Path, decoded_path: &Path) -> Result<()> {
+    use std::process::Command;
+    let (out, tmp) = tempfile::NamedTempFile::new()?.into_parts();
+    Command::new(cmd).arg(path).stdout(out).status()?;
+    let typ = infer_from_path(infer, &tmp)?;
+    generic_decode(infer, &typ, &tmp, decoded_path)
+}
+
+#[cfg(unix)]
+fn generic_decode(infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
     use std::process::Command;
     match typ {
+        "text/plain"
+        | "text/csv"
+        | "text/xml"
+        | "text/x-Algol68"
+        | "text/x-lisp"
+        | "text/x-c"
+        | "text/x-script.python"
+        | "text/x-perl"
+        | "text/x-shellscript"
+        | "text/x-tcl"
+        | "application/json" => {
+            fs::copy(path, decoded_path)?;
+            Ok(())
+        }
         "application/vnd.oasis.opendocument.text"
+        | "text/html"
         | "application/vnd.ms-powerpoint"
         | "application/vnd.oasis.opendocument.presentation"
         | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -175,11 +242,59 @@ fn generic_decode(typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
         "application/vnd.ms-excel"
         | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         | "application/vnd.oasis.opendocument.spreadsheet" => loconvert("csv", path, decoded_path),
+        "application/epub+zip" => {
+            Command::new("epub2txt")
+                .arg(path)
+                .stdout(File::create(decoded_path)?)
+                .status()?;
+            Ok(())
+        }
+        "application/pdf" => {
+            Command::new("pdftotext")
+                .arg(path)
+                .arg(decoded_path)
+                .status()?;
+            Ok(())
+        }
+        "application/postscript" => {
+            Command::new("ps2txt")
+                .arg(path)
+                .stdout(File::create(decoded_path)?)
+                .status()?;
+            Ok(())
+        }
+        "application/x-bzip2" => uncompress(infer, "bzcat", path, decoded_path),
+        "application/gzip" => uncompress(infer, "zcat", path, decoded_path),
+        "application/x-xz" => uncompress(infer, "xzcat", path, decoded_path),
+        "application/zstd" => uncompress(infer, "zstdcat", path, decoded_path),
+        "application/x-lzma" => uncompress(infer, "lzcat", path, decoded_path),
+        "application/x-executable"
+        | "application/x-pie-executable"
+        | "application/octet-stream" => {
+            Command::new("strings")
+                .arg(path)
+                .stdout(File::create(decoded_path)?)
+                .status()?;
+            Ok(())
+        }
+        "text/troff" => {
+            Command::new("man")
+                .arg(path)
+                .stdout(File::create(decoded_path)?)
+                .status()?;
+            Ok(())
+        }
         _ => bail!("no decoder for mime type {}", typ),
     }
 }
 
 #[cfg(windows)]
-fn generic_decode(typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
-    unimplemented!()
+fn generic_decode(_infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
+    match typ {
+        "text/plain" => {
+            fs::copy(path, decoded_path)?;
+            Ok(())
+        }
+        typ => bail!("no decoder for mime type {}", typ),
+    }
 }

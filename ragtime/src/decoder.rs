@@ -224,6 +224,19 @@ fn generic_decode(infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) ->
         | "text/x-Algol68"
         | "text/x-lisp"
         | "text/x-c"
+        | "text/x-c++"
+        | "text/x-objective-c"
+        | "text/x-ruby"
+        | "text/x-asm"
+        | "text/x-fortran"
+        | "text/x-java"
+        | "text/x-pascal"
+        | "text/x-haskell"
+        | "text/x-erlang"
+        | "text/x-lua"
+        | "text/x-php"
+        | "text/x-m4"
+        | "application/x-msdos-batch"
         | "text/x-script.python"
         | "text/x-perl"
         | "text/x-shellscript"
@@ -270,6 +283,7 @@ fn generic_decode(infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) ->
         "application/x-lzma" => uncompress(infer, "lzcat", path, decoded_path),
         "application/x-executable"
         | "application/x-pie-executable"
+        | "application/x-sharedlib"
         | "application/octet-stream" => {
             Command::new("strings")
                 .arg(path)

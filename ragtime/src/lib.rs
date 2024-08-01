@@ -14,13 +14,13 @@ use tokenizers::Tokenizer;
 use usearch::ffi::Matches;
 
 pub mod bge_m3;
+pub mod decoder;
 pub mod doc;
 pub mod gte_large_en;
 pub mod gte_qwen2_7b_instruct;
 pub mod llama;
 pub mod phi3;
 pub mod simple_prompt;
-pub mod general_decoder;
 
 fn session_from_model_file<P: AsRef<Path>>(model: P, tokenizer: P) -> Result<(Session, Tokenizer)> {
     let session = Session::builder()?
@@ -39,21 +39,6 @@ fn l2_normalize(input: &mut [f32]) {
     for val in input {
         *val /= magnitude;
     }
-}
-
-pub trait DecodedFile: Clone + Debug {
-    fn decoded_path(&self) -> &Path;
-    fn original_path(&self) -> &Path;
-}
-
-pub trait FileDecoder: Debug {
-    type TmpFile: DecodedFile;
-
-    /// decode must determine if the file is plain text, and if not it must decode the file to plain text.
-    /// If it can't be decoded, it should return an error. Otherwise it must return a `TmpFile`, which will be held
-    /// by the system until the file is no longer needed. Decode may be called multiple times for the same file,
-    /// the decoder should only clean up it's `TmpFile` when every reference to that file has been dropped.
-    fn decode<P: AsRef<Path>>(&mut self, path: P) -> Result<Self::TmpFile>;
 }
 
 pub trait Persistable: Sized {
@@ -146,17 +131,16 @@ for tok in qa.ask("question about your docs", None)? {
 # }
 ```
 **/
-pub struct RagQa<E, Q, D: FileDecoder> {
-    docs: DocStore<D>,
+pub struct RagQa<E, Q> {
+    docs: DocStore,
     db: E,
     qa: Q,
 }
 
-impl<E, Q, D> RagQa<E, Q, D>
+impl<E, Q> RagQa<E, Q>
 where
     E: Persistable,
     Q: Persistable,
-    D: FileDecoder,
 {
     /// save the state to the specified directory, which will be
     /// created if it does not exist.
@@ -177,7 +161,6 @@ where
 
     /// load the state from the specified directory
     pub fn load<P: AsRef<Path>>(
-        decoder: D,
         embed_ctx: E::Ctx,
         qa_ctx: Q::Ctx,
         path: P,
@@ -187,22 +170,24 @@ where
         if !path.is_dir() {
             bail!("save directory could not be found")
         }
-        let docs = DocStore::load(decoder, path.join("docs.json"))?;
+        let docs = DocStore::load(path.join("docs.json"))?;
         let db = E::load(embed_ctx, path.join("db.json"), view)?;
         let qa = Q::load(qa_ctx, path.join("model.json"), view)?;
         Ok(Self { docs, db, qa })
     }
 }
 
-impl<E, Q, D> RagQa<E, Q, D>
+impl<E, Q> RagQa<E, Q>
 where
     E: EmbedModel,
     Q: QaModel,
-    D: FileDecoder,
 {
-    pub fn new(decoder: D, max_mapped: usize, db: E, qa: Q) -> Result<Self> {
-        let docs = DocStore::new(decoder, max_mapped);
-        Ok(Self { docs, db, qa })
+    pub fn new<P: AsRef<Path>>(tmp_dir: P, max_mapped: usize, db: E, qa: Q) -> Result<Self> {
+        Ok(Self {
+            docs: DocStore::new(tmp_dir, max_mapped)?,
+            db,
+            qa,
+        })
     }
 
     pub fn add_document<P: AsRef<Path>>(
@@ -212,7 +197,7 @@ where
         overlap: usize,
     ) -> Result<()> {
         use std::fmt::Write;
-        let decoded = self.docs.decoder().decode(doc.as_ref())?;
+        let decoded = self.docs.decoder_mut().decode(doc.as_ref())?;
         let summary = {
             let txt = fs::read_to_string(decoded.decoded_path())?;
             if txt.len() >= 512 {
@@ -245,6 +230,17 @@ where
         }
         self.db.add(p.finalize()?, &chunks)?;
         Ok(())
+    }
+
+    /// add or override a custom decoder for a specific mime type. The decoder takes the path 
+    /// to the original file and the path to the temp file it should write to and returns a Result 
+    /// indicating success or failure.
+    pub fn add_decoder(
+        &mut self,
+        mime_type: &'static str,
+        decoder: Box<dyn FnMut(&Path, &Path) -> Result<()>>,
+    ) {
+        self.docs.decoder_mut().add_decoder(mime_type, decoder)
     }
 
     fn encode_prompt(&mut self, q: &str) -> Result<<Q::Prompt as FormattedPrompt>::FinalPrompt> {
@@ -311,7 +307,7 @@ where
     }
 }
 
-pub type RagQaPhi3BgeM3<D> = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3, D>;
-pub type RagQaPhi3GteLargeEn<D> = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3, D>;
-pub type RagQaPhi3GteQwen27bInstruct<D> =
-    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3, D>;
+pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
+pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;
+pub type RagQaPhi3GteQwen27bInstruct =
+    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;

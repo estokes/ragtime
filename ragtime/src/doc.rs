@@ -1,5 +1,5 @@
 /// Document handling
-use crate::{DecodedFile, FileDecoder};
+use crate::decoder::{Decoded, Decoder};
 use anyhow::{anyhow, bail, Ok, Result};
 use chrono::prelude::*;
 use fxhash::{FxBuildHasher, FxHashMap};
@@ -96,19 +96,16 @@ impl<'a> Iterator for ChunkIter<'a> {
 }
 
 #[derive(Debug)]
-struct Doc<D: FileDecoder> {
-    decoded: D::TmpFile,
+struct Doc {
+    decoded: Decoded,
     id: DocId,
     _file: File,
     map: Mmap,
     last_used: DateTime<Utc>,
 }
 
-impl<D> Doc<D>
-where
-    D: FileDecoder,
-{
-    fn new(id: DocId, decoded: D::TmpFile) -> Result<Self> {
+impl Doc {
+    fn new(id: DocId, decoded: Decoded) -> Result<Self> {
         let file = File::open(decoded.decoded_path())?;
         let map = unsafe { Mmap::map(&file)? };
         Ok(Self {
@@ -170,33 +167,31 @@ struct Saved {
     next_docid: u64,
     next_chunkid: u64,
     max_mapped: usize,
+    tmp_dir: PathBuf,
 }
 
 #[derive(Debug)]
-pub struct DocStore<D: FileDecoder> {
-    mapped: IndexMap<DocId, Doc<D>, FxBuildHasher>,
+pub struct DocStore {
+    mapped: IndexMap<DocId, Doc, FxBuildHasher>,
     unmapped: FxHashMap<DocId, PathBuf>,
     summary: FxHashMap<DocId, String>,
     by_path: FxHashMap<PathBuf, DocId>,
     chunks: FxHashMap<ChunkId, Chunk>,
     max_mapped: usize,
-    decoder: D,
+    decoder: Decoder,
 }
 
-impl<D> DocStore<D>
-where
-    D: FileDecoder,
-{
-    pub fn new(decoder: D, max_mapped: usize) -> Self {
-        Self {
+impl DocStore {
+    pub fn new<P: AsRef<Path>>(tmp_dir: P, max_mapped: usize) -> Result<Self> {
+        Ok(Self {
             mapped: IndexMap::default(),
             unmapped: HashMap::default(),
             summary: HashMap::default(),
             by_path: HashMap::default(),
             chunks: HashMap::default(),
             max_mapped,
-            decoder,
-        }
+            decoder: Decoder::new(tmp_dir)?,
+        })
     }
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -219,13 +214,14 @@ where
             next_chunkid,
             next_docid,
             max_mapped: self.max_mapped,
+            tmp_dir: self.decoder.tmp_dir().to_path_buf(),
         };
         Ok(serde_json::to_writer_pretty(&mut fd, &saved)?)
     }
 
-    pub fn load<P: AsRef<Path>>(decoder: D, path: P) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
-        let mut t = Self::new(decoder, saved.max_mapped);
+        let mut t = Self::new(&saved.tmp_dir, saved.max_mapped)?;
         for (id, path, summary) in saved.docs {
             t.unmapped.insert(id, path.clone());
             if let Some(summary) = summary {
@@ -323,7 +319,7 @@ where
         })
     }
 
-    pub(crate) fn decoder(&mut self) -> &mut D {
+    pub(super) fn decoder_mut(&mut self) -> &mut Decoder {
         &mut self.decoder
     }
 }

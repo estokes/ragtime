@@ -182,9 +182,9 @@ where
     E: EmbedModel,
     Q: QaModel,
 {
-    pub fn new<P: AsRef<Path>>(tmp_dir: P, max_mapped: usize, db: E, qa: Q) -> Result<Self> {
+    pub fn new(max_mapped: usize, db: E, qa: Q) -> Result<Self> {
         Ok(Self {
-            docs: DocStore::new(tmp_dir, max_mapped)?,
+            docs: DocStore::new(max_mapped)?,
             db,
             qa,
         })
@@ -232,8 +232,8 @@ where
         Ok(())
     }
 
-    /// add or override a custom decoder for a specific mime type. The decoder takes the path 
-    /// to the original file and the path to the temp file it should write to and returns a Result 
+    /// add or override a custom decoder for a specific mime type. The decoder takes the path
+    /// to the original file and the path to the temp file it should write to and returns a Result
     /// indicating success or failure.
     pub fn add_decoder(
         &mut self,
@@ -306,8 +306,3 @@ where
             .collect::<Result<_>>()
     }
 }
-
-pub type RagQaPhi3BgeM3 = RagQa<bge_m3::onnx::BgeM3, phi3::llama::Phi3>;
-pub type RagQaPhi3GteLargeEn = RagQa<gte_large_en::onnx::GteLargeEn, phi3::llama::Phi3>;
-pub type RagQaPhi3GteQwen27bInstruct =
-    RagQa<gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, phi3::llama::Phi3>;

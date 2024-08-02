@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::Parser;
 use llama_cpp_2::llama_backend::LlamaBackend;
-use ragtime::{llama, RagQaPhi3GteQwen27bInstruct};
+use ragtime::{
+    gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, llama, phi3::llama::Phi3, EmbedModel,
+    QaModel, RagQa,
+};
 use std::{
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
@@ -13,13 +16,21 @@ use std::{
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(long, help = "path to the embedding model (onnx)")]
+    #[arg(long, help = "path to the embedding model")]
     emb_model: Option<PathBuf>,
     #[arg(long, help = "path to the embedding tokenizer (e.g. tokenizer.json)")]
     emb_tokenizer: Option<PathBuf>,
-    #[arg(long, help = "the number of gpu layers to use for the embedding model (1000)", default_value = "1000")]
+    #[arg(
+        long,
+        help = "the number of gpu layers to use for the embedding model (1000)",
+        default_value = "1000"
+    )]
     emb_gpu_layers: u32,
-    #[arg(long, help = "the number of gpu layers to use for the qa model (1000)", default_value = "1000")]
+    #[arg(
+        long,
+        help = "the number of gpu layers to use for the qa model (1000)",
+        default_value = "1000"
+    )]
     qa_gpu_layers: u32,
     #[arg(long, help = "path to the QA model (gguf)")]
     qa_model: Option<PathBuf>,
@@ -60,9 +71,8 @@ struct Args {
 }
 
 impl Args {
-    fn init(&self) -> Result<(bool, RagQaPhi3GteQwen27bInstruct)> {
+    fn init(&self) -> Result<(bool, RagQa<GteQwen27bInstruct, Phi3>)> {
         tracing_subscriber::fmt::init();
-        ort::init().commit()?;
         let backend = Arc::new({
             let mut be = LlamaBackend::init()?;
             if self.quiet {
@@ -72,7 +82,7 @@ impl Args {
         });
         if let Some(cp) = &self.checkpoint {
             let view = self.add_document.is_empty();
-            if let Ok(qa) = RagQaPhi3GteQwen27bInstruct::load(
+            if let Ok(qa) = RagQa::<GteQwen27bInstruct, Phi3>::load(
                 Arc::clone(&backend),
                 Arc::clone(&backend),
                 cp,
@@ -91,15 +101,16 @@ impl Args {
             .ok_or_else(|| anyhow!("qa model is required"))?;
         let npar = available_parallelism()?.get() as u32;
         let threads = self.threads.unwrap_or_else(|| npar);
-        let qa = RagQaPhi3GteQwen27bInstruct::new(
-            self.max_mapped,
+        let embed = GteQwen27bInstruct::new(
             backend.clone(),
             llama::Args::default()
                 .with_threads(threads)
                 .with_seed(self.seed)
                 .with_model(emb_model.clone())
                 .with_gpu_layers(self.emb_gpu_layers),
-            backend,
+        )?;
+        let qa = Phi3::new(
+            backend.clone(),
             llama::Args::default()
                 .with_threads(threads)
                 .with_ctx_divisor(self.ctx_divisor)
@@ -107,6 +118,7 @@ impl Args {
                 .with_model(qa_model.clone())
                 .with_gpu_layers(self.qa_gpu_layers),
         )?;
+        let qa = RagQa::new(self.max_mapped, embed, qa)?;
         Ok((false, qa))
     }
 }

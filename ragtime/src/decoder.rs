@@ -1,10 +1,8 @@
 use anyhow::{anyhow, bail, Result};
-use compact_str::CompactString;
+use compact_str::{format_compact, CompactString};
 use core::fmt;
-use fs3::FileExt;
 use fxhash::FxHashMap;
 use infer::{Infer, Matcher};
-use regex::bytes::Regex;
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
@@ -13,6 +11,7 @@ use std::{
         Arc, Weak,
     },
 };
+use tempfile::TempDir;
 
 #[derive(Debug)]
 struct DecodedInner {
@@ -44,11 +43,9 @@ impl Decoded {
 pub struct Decoder {
     decoded: FxHashMap<PathBuf, Weak<DecodedInner>>,
     decoders: FxHashMap<&'static str, Box<dyn FnMut(&Path, &Path) -> Result<()>>>,
-    tmpdir: PathBuf,
+    tmpdir: TempDir,
     open: Arc<AtomicU32>,
     next_id: u64,
-    lock_file: File,
-    tmp_file_regex: Regex,
     infer: Infer,
 }
 
@@ -58,31 +55,7 @@ impl fmt::Debug for Decoder {
     }
 }
 
-impl Drop for Decoder {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
-        let _ = self.lock_file.unlock();
-    }
-}
-
 impl Decoder {
-    fn cleanup(&self) -> Result<()> {
-        for f in self.tmpdir.read_dir()? {
-            let f = f?;
-            if f.file_type()?.is_file() {
-                let name = f.file_name();
-                if self.tmp_file_regex.is_match(name.as_encoded_bytes()) {
-                    fs::remove_file(f.path())?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn tmp_dir(&self) -> &Path {
-        &self.tmpdir
-    }
-
     /// Add a custom decoder for a specific mime type. The decoder is a
     /// closure that takes the path to the original file and the path to
     /// the decoded file and decodes the file to text.
@@ -108,23 +81,15 @@ impl Decoder {
         self.infer.add(mime, extension, matcher)
     }
 
-    pub fn new<S: AsRef<Path>>(tmpdir: S) -> Result<Self> {
-        let tmpdir = tmpdir.as_ref().to_path_buf();
-        let lock_file = File::create(tmpdir.join(".gdlock"))?;
-        lock_file.try_lock_exclusive()?;
-        let tmp_file_regex = Regex::new(r"^gd[0-9]+$")?;
-        let t = Self {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
             decoded: FxHashMap::default(),
             decoders: FxHashMap::default(),
-            tmpdir,
+            tmpdir: TempDir::new()?,
             open: Arc::new(AtomicU32::new(0)),
             next_id: 0,
-            lock_file,
-            tmp_file_regex,
             infer: Infer::new(),
-        };
-        t.cleanup()?;
-        Ok(t)
+        })
     }
 
     pub fn decode<P: AsRef<Path>>(&mut self, path: P) -> Result<Decoded> {
@@ -134,7 +99,11 @@ impl Decoder {
                 return Ok(Decoded(decoded));
             }
         }
-        let decoded_path = self.tmpdir.join(format!("gd{}", self.next_id));
+        let decoded_path = self
+            .tmpdir
+            .path()
+            .join(&*format_compact!("{}", self.next_id));
+        self.next_id += 1;
         let typ = infer_from_path(&self.infer, path)?;
         match self.decoders.get_mut(&*typ) {
             Some(decoder) => decoder(path, &decoded_path)?,
@@ -147,7 +116,6 @@ impl Decoder {
         });
         self.decoded
             .insert(path.to_path_buf(), Arc::downgrade(&decoded));
-        self.next_id += 1;
         self.open.fetch_add(1, Ordering::Relaxed);
         self.gc();
         Ok(Decoded(decoded))
@@ -201,7 +169,7 @@ fn loconvert(ext: &str, path: &Path, decoded_path: &Path) -> Result<()> {
         .arg("--outdir")
         .arg(dir.path())
         .status()?;
-    fs::copy(&outfile, decoded_path)?;
+    fs::rename(&outfile, decoded_path)?;
     Ok(())
 }
 

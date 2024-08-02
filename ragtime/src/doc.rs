@@ -167,7 +167,6 @@ struct Saved {
     next_docid: u64,
     next_chunkid: u64,
     max_mapped: usize,
-    tmp_dir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -182,7 +181,7 @@ pub struct DocStore {
 }
 
 impl DocStore {
-    pub fn new<P: AsRef<Path>>(tmp_dir: P, max_mapped: usize) -> Result<Self> {
+    pub fn new(max_mapped: usize) -> Result<Self> {
         Ok(Self {
             mapped: IndexMap::default(),
             unmapped: HashMap::default(),
@@ -190,7 +189,7 @@ impl DocStore {
             by_path: HashMap::default(),
             chunks: HashMap::default(),
             max_mapped,
-            decoder: Decoder::new(tmp_dir)?,
+            decoder: Decoder::new()?,
         })
     }
 
@@ -214,14 +213,13 @@ impl DocStore {
             next_chunkid,
             next_docid,
             max_mapped: self.max_mapped,
-            tmp_dir: self.decoder.tmp_dir().to_path_buf(),
         };
         Ok(serde_json::to_writer_pretty(&mut fd, &saved)?)
     }
 
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
-        let mut t = Self::new(&saved.tmp_dir, saved.max_mapped)?;
+        let mut t = Self::new(saved.max_mapped)?;
         for (id, path, summary) in saved.docs {
             t.unmapped.insert(id, path.clone());
             if let Some(summary) = summary {
@@ -297,7 +295,8 @@ impl DocStore {
                 .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
             while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
                 let (id, doc) = self.mapped.pop().unwrap();
-                self.unmapped.insert(id, doc.decoded.original_path().to_path_buf());
+                self.unmapped
+                    .insert(id, doc.decoded.original_path().to_path_buf());
             }
         }
         Ok(chunk)

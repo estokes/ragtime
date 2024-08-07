@@ -104,7 +104,7 @@ impl Decoder {
             .path()
             .join(&*format_compact!("{}", self.next_id));
         self.next_id += 1;
-        let typ = infer_from_path(&self.infer, path)?;
+        let typ = dbg!(infer_from_path(&self.infer, path))?;
         match self.decoders.get_mut(&*typ) {
             Some(decoder) => decoder(path, &decoded_path)?,
             None => generic_decode(&self.infer, &typ, path, &decoded_path)?,

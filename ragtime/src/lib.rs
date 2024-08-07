@@ -197,9 +197,10 @@ where
         overlap: usize,
     ) -> Result<()> {
         use std::fmt::Write;
+        dbg!("adding document", doc.as_ref());
         let decoded = self.docs.decoder_mut().decode(doc.as_ref())?;
         let summary = {
-            let txt = fs::read_to_string(decoded.decoded_path())?;
+            let txt = fs::read_to_string(dbg!(decoded.decoded_path()))?;
             if txt.len() >= 512 {
                 let mut summary = String::new();
                 let mut prompt = Q::Prompt::new();

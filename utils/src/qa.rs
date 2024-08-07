@@ -47,10 +47,16 @@ struct Args {
     overlap_size: usize,
     #[arg(
         long,
-        default_value = "8",
-        help = "the context divisor (trade context for less memory use)"
+        default_value = "16",
+        help = "the context divisor for the embed model (trade context for less memory use)"
     )]
-    ctx_divisor: u32,
+    emb_ctx_divisor: u32,
+    #[arg(
+        long,
+        default_value = "8",
+        help = "the context divisor for the qa model (trade context for less memory use)"
+    )]
+    qa_ctx_divisor: u32,
     #[arg(
         long,
         default_value = "64",
@@ -105,6 +111,7 @@ impl Args {
             backend.clone(),
             llama::Args::default()
                 .with_threads(threads)
+                .with_ctx_divisor(self.emb_ctx_divisor)
                 .with_seed(self.seed)
                 .with_model(emb_model.clone())
                 .with_gpu_layers(self.emb_gpu_layers),
@@ -113,7 +120,7 @@ impl Args {
             backend.clone(),
             llama::Args::default()
                 .with_threads(threads)
-                .with_ctx_divisor(self.ctx_divisor)
+                .with_ctx_divisor(self.qa_ctx_divisor)
                 .with_seed(self.seed)
                 .with_model(qa_model.clone())
                 .with_gpu_layers(self.qa_gpu_layers),

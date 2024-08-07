@@ -12,6 +12,7 @@ use llama_cpp_2::{
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
+    cmp::min,
     fs::{File, OpenOptions},
     iter,
     marker::PhantomPinned,
@@ -161,7 +162,7 @@ struct TokenIter<'a, Model: LlamaQaModel> {
     decoder: Decoder,
     batch: LlamaBatch,
     answer: String,
-    gen: Option<usize>,
+    gen: usize,
     i: i32,
     question_len: i32,
 }
@@ -171,10 +172,8 @@ where
     Model: LlamaQaModel,
 {
     fn step(&mut self) -> Result<Option<CompactString>> {
-        if let Some(gen) = self.gen {
-            if self.i as usize >= gen + self.question_len as usize {
-                return Ok(None);
-            }
+        if self.i as usize >= self.gen + self.question_len as usize {
+            return Ok(None);
         }
         if self.i as u32 > self.t.inner.n_ctx {
             return Ok(None);
@@ -238,22 +237,28 @@ where
         gen: Option<usize>,
     ) -> Result<impl Iterator<Item = Result<CompactString>>> {
         let n_ctx = self.inner.n_ctx as usize;
+        // save some of the context for the answer
+        let min_answer = n_ctx >> 4;
         self.inner.as_mut().ctx().clear_kv_cache();
         let tokens = self
             .inner
             .model
             .str_to_token(&question.as_ref(), AddBos::Always)?;
-        let mut batch = LlamaBatch::new(self.inner.n_ctx as usize, 1);
-        let last_idx: i32 = (tokens.len() - 1) as i32;
+        let mut batch = LlamaBatch::new(n_ctx, 1);
+        let last_idx: i32 = min((tokens.len() - 1) as i32, (n_ctx - min_answer) as i32);
         for (i, token) in (0i32..).zip(tokens.into_iter()) {
-            batch.add(token, i, &[0], i == last_idx)?;
+            let last = i == last_idx;
+            batch.add(token, i, &[0], last)?;
+            if last {
+                break;
+            }
         }
         Ok(TokenIter {
             t: self,
             decoder: encoding_rs::UTF_8.new_decoder(),
             batch,
             answer: String::with_capacity(gen.unwrap_or(n_ctx) * 32),
-            gen,
+            gen: gen.unwrap_or(n_ctx - (last_idx + 1) as usize),
             i: last_idx + 1,
             question_len: last_idx + 1,
         })

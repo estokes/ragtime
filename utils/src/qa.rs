@@ -134,7 +134,9 @@ pub fn main() -> Result<()> {
     let args = Args::parse();
     let (view, mut qa) = args.init()?;
     for doc in &args.add_document {
-        qa.add_document(doc, args.chunk_size, args.overlap_size)?;
+        if let Err(e) = qa.add_document(doc, args.chunk_size, args.overlap_size) {
+            eprintln!("failed to add document: {e:?}")
+        }
     }
     if let Some(cp) = &args.checkpoint {
         if !view {

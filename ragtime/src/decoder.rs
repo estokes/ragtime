@@ -200,6 +200,7 @@ fn generic_decode(infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) ->
         | "text/x-java"
         | "text/x-pascal"
         | "text/x-haskell"
+        | "text/x-makefile"
         | "text/x-erlang"
         | "text/x-lua"
         | "text/x-php"

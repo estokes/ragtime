@@ -253,6 +253,7 @@ impl DocStore {
         chunk_size: usize,
         overlap: usize,
     ) -> Result<impl Iterator<Item = Result<(ChunkId, &'a str)>> + 'a> {
+        self.gc();
         let decoded = self.decoder.decode(path.as_ref())?;
         let id = match self.by_path.entry(PathBuf::from(path.as_ref())) {
             Entry::Vacant(e) => *e.insert(DocId::new()),
@@ -269,6 +270,18 @@ impl DocStore {
             chunks.insert(chunk.id, chunk);
             Ok((chunk.id, doc.get(&chunk)?))
         }))
+    }
+
+    fn gc(&mut self) {
+        if self.mapped.len() > self.max_mapped {
+            self.mapped
+                .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
+            while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
+                let (id, doc) = self.mapped.pop().unwrap();
+                self.unmapped
+                    .insert(id, doc.decoded.original_path().to_path_buf());
+            }
+        }
     }
 
     pub fn get_chunk(&mut self, id: u64) -> Result<Chunk> {
@@ -290,15 +303,7 @@ impl DocStore {
                 }
             },
         }
-        if self.mapped.len() > self.max_mapped {
-            self.mapped
-                .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
-            while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
-                let (id, doc) = self.mapped.pop().unwrap();
-                self.unmapped
-                    .insert(id, doc.decoded.original_path().to_path_buf());
-            }
-        }
+        self.gc();
         Ok(chunk)
     }
 

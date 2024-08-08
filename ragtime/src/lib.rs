@@ -198,6 +198,10 @@ where
     ) -> Result<()> {
         use std::fmt::Write;
         dbg!("adding document", doc.as_ref());
+        if self.docs.contains(&doc) {
+            dbg!("skipping; already added");
+            return Ok(());
+        }
         let decoded = self.docs.decoder_mut().decode(doc.as_ref())?;
         let summary = {
             let txt = fs::read_to_string(dbg!(decoded.decoded_path()))?;

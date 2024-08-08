@@ -246,6 +246,10 @@ impl DocStore {
         Ok(t)
     }
 
+    pub fn contains<P: AsRef<Path>>(&self, doc: P) -> bool {
+        self.by_path.contains_key(doc.as_ref())
+    }
+
     pub fn add_document<'a, P: AsRef<Path>, S: AsRef<str>>(
         &'a mut self,
         path: P,

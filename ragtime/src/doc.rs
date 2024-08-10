@@ -304,10 +304,10 @@ impl DocStore {
                     let doc = Doc::new(chunk.doc, decoded)?;
                     self.unmapped.remove(&chunk.doc);
                     self.mapped.insert(chunk.doc, doc);
+                    self.gc();
                 }
             },
         }
-        self.gc();
         Ok(chunk)
     }
 

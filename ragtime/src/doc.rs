@@ -7,6 +7,8 @@ use indexmap::IndexMap;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
+use std::error::Error;
+use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
@@ -14,6 +16,17 @@ use std::{
     fs::File,
     path::{Path, PathBuf},
 };
+
+#[derive(Debug, Clone)]
+pub struct DocumentChanged(PathBuf);
+
+impl Display for DocumentChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The document {:?} has changed since it was indexed", &self.0)
+    }
+}
+
+impl Error for DocumentChanged {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DocId(u64);
@@ -317,10 +330,7 @@ impl DocStore {
                     let map = unsafe { Mmap::map(&file)? };
                     let md5sum = md5::compute(&*map).0;
                     if md5sum != saved.md5sum {
-                        bail!(
-                            "document {:?} has changed since it was indexed",
-                            decoded.original_path()
-                        )
+                        bail!(DocumentChanged(decoded.original_path().to_path_buf()))
                     }
                     let doc = Doc::new(
                         decoded,

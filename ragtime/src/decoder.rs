@@ -104,7 +104,7 @@ impl Decoder {
             .path()
             .join(&*format_compact!("{}", self.next_id));
         self.next_id += 1;
-        let typ = dbg!(infer_from_path(&self.infer, path))?;
+        let typ = dbg!(infer_from_path(&self.infer, dbg!(path)))?;
         match self.decoders.get_mut(&*typ) {
             Some(decoder) => decoder(path, &decoded_path)?,
             None => generic_decode(&self.infer, &typ, path, &decoded_path)?,
@@ -184,6 +184,7 @@ fn uncompress(infer: &Infer, cmd: &str, path: &Path, decoded_path: &Path) -> Res
 
 #[cfg(unix)]
 fn generic_decode(infer: &Infer, typ: &str, path: &Path, decoded_path: &Path) -> Result<()> {
+    dbg!(decoded_path);
     use std::process::Command;
     match typ {
         "text/plain"

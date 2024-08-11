@@ -98,23 +98,21 @@ impl<'a> Iterator for ChunkIter<'a> {
 #[derive(Debug)]
 struct Doc {
     decoded: Decoded,
-    id: DocId,
     _file: File,
     map: Mmap,
     last_used: DateTime<Utc>,
+    saved: SavedDoc,
 }
 
 impl Doc {
-    fn new(id: DocId, decoded: Decoded) -> Result<Self> {
-        let file = File::open(decoded.decoded_path())?;
-        let map = unsafe { Mmap::map(&file)? };
-        Ok(Self {
+    fn new(decoded: Decoded, saved: SavedDoc, file: File, map: Mmap) -> Self {
+        Self {
             decoded,
-            id,
             _file: file,
             map,
             last_used: Utc::now(),
-        })
+            saved,
+        }
     }
 
     /// Return an iterator over the chunks in this
@@ -124,7 +122,7 @@ impl Doc {
     /// produce 512 word chunks that overlap with each other by 256
     /// words.
     fn chunks<'a>(&'a self, chunk_size: usize, overlap: usize) -> Result<ChunkIter<'a>> {
-        let id = self.id;
+        let id = self.saved.id;
         if chunk_size == 0 || overlap >= chunk_size {
             bail!("chunk_size must be > 0, overlap must be < tokens")
         }
@@ -139,6 +137,12 @@ impl Doc {
 
     fn get<'a>(&'a self, chunk: &Chunk) -> Result<&'a str> {
         let data = &*self.map;
+        if chunk.end >= data.len() {
+            bail!(
+                "chunk out of bounds, doc: {:?} has changed since it was indexed?",
+                chunk.doc
+            )
+        }
         let res = std::str::from_utf8(&data[chunk.start..chunk.end])?;
         Ok(res)
     }
@@ -160,9 +164,17 @@ pub struct Chunk {
     end: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedDoc {
+    id: DocId,
+    path: PathBuf,
+    summary: Option<String>,
+    md5sum: [u8; 16],
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Saved {
-    docs: Vec<(DocId, PathBuf, Option<String>)>,
+    docs: Vec<SavedDoc>,
     chunks: Vec<Chunk>,
     next_docid: u64,
     next_chunkid: u64,
@@ -172,8 +184,7 @@ struct Saved {
 #[derive(Debug)]
 pub struct DocStore {
     mapped: IndexMap<DocId, Doc, FxBuildHasher>,
-    unmapped: FxHashMap<DocId, PathBuf>,
-    summary: FxHashMap<DocId, String>,
+    unmapped: FxHashMap<DocId, SavedDoc>,
     by_path: FxHashMap<PathBuf, DocId>,
     chunks: FxHashMap<ChunkId, Chunk>,
     max_mapped: usize,
@@ -185,7 +196,6 @@ impl DocStore {
         Ok(Self {
             mapped: IndexMap::default(),
             unmapped: HashMap::default(),
-            summary: HashMap::default(),
             by_path: HashMap::default(),
             chunks: HashMap::default(),
             max_mapped,
@@ -202,9 +212,10 @@ impl DocStore {
         let next_docid = NEXT_DOCID.load(Ordering::Relaxed);
         let next_chunkid = NEXT_CHUNKID.load(Ordering::Relaxed);
         let docs = self
-            .by_path
+            .mapped
             .iter()
-            .map(|(p, id)| (*id, p.clone(), self.summary.get(id).cloned()))
+            .map(|(_, d)| d.saved.clone())
+            .chain(self.unmapped.values().cloned())
             .collect();
         let chunks = self.chunks.iter().map(|(_, c)| *c).collect();
         let saved = Saved {
@@ -220,12 +231,9 @@ impl DocStore {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let saved: Saved = serde_json::from_reader(File::open(path.as_ref())?)?;
         let mut t = Self::new(saved.max_mapped)?;
-        for (id, path, summary) in saved.docs {
-            t.unmapped.insert(id, path.clone());
-            if let Some(summary) = summary {
-                t.summary.insert(id, summary);
-            }
-            t.by_path.insert(path, id);
+        for sd in saved.docs {
+            t.by_path.insert(sd.path.clone(), sd.id);
+            t.unmapped.insert(sd.id, sd);
         }
         for chunk in saved.chunks {
             t.chunks.insert(chunk.id, chunk);
@@ -263,12 +271,17 @@ impl DocStore {
             Entry::Vacant(e) => *e.insert(DocId::new()),
             Entry::Occupied(_) => bail!("document {:?} already loaded", path.as_ref()),
         };
+        let file = File::open(decoded.decoded_path())?;
+        let map = unsafe { Mmap::map(&file)? };
+        let saved = SavedDoc {
+            id,
+            path: decoded.original_path().to_path_buf(),
+            summary: summary.map(|s| s.as_ref().into()),
+            md5sum: md5::compute(&*map).0,
+        };
         let chunks = &mut self.chunks;
         let mapped = &mut self.mapped;
-        if let Some(summary) = summary {
-            self.summary.insert(id, summary.as_ref().into());
-        }
-        mapped.insert(id, Doc::new(id, decoded)?);
+        mapped.insert(id, Doc::new(decoded, saved, file, map));
         let doc = &mapped[&id];
         Ok(doc.chunks(chunk_size, overlap)?.map(move |chunk| {
             chunks.insert(chunk.id, chunk);
@@ -282,8 +295,7 @@ impl DocStore {
                 .sort_by(|_, d0, _, d1| d1.last_used.cmp(&d0.last_used));
             while self.mapped.len() > 0 && self.mapped.len() > self.max_mapped {
                 let (id, doc) = self.mapped.pop().unwrap();
-                self.unmapped
-                    .insert(id, doc.decoded.original_path().to_path_buf());
+                self.unmapped.insert(id, doc.saved);
             }
         }
     }
@@ -299,10 +311,23 @@ impl DocStore {
             }
             None => match self.unmapped.get(&chunk.doc) {
                 None => bail!("no document for chunk {id}"),
-                Some(path) => {
-                    let decoded = self.decoder.decode(path)?;
-                    let doc = Doc::new(chunk.doc, decoded)?;
-                    self.unmapped.remove(&chunk.doc);
+                Some(saved) => {
+                    let decoded = self.decoder.decode(&saved.path)?;
+                    let file = File::open(decoded.decoded_path())?;
+                    let map = unsafe { Mmap::map(&file)? };
+                    let md5sum = md5::compute(&*map).0;
+                    if md5sum != saved.md5sum {
+                        bail!(
+                            "document {:?} has changed since it was indexed",
+                            decoded.original_path()
+                        )
+                    }
+                    let doc = Doc::new(
+                        decoded,
+                        self.unmapped.remove(&chunk.doc).unwrap(),
+                        file,
+                        map,
+                    );
                     self.mapped.insert(chunk.doc, doc);
                     self.gc();
                 }
@@ -311,17 +336,15 @@ impl DocStore {
         Ok(chunk)
     }
 
-    /// Get the text of a chunk and the summary of the document it came from. (summary, chunk_text)
+    /// Get the text of a chunk and the summary of the document it came from.
     pub fn get<'a>(&'a self, chunk: &Chunk) -> Result<DocRef<'a>> {
         let doc = self
             .mapped
             .get(&chunk.doc)
             .ok_or_else(|| anyhow!("document isn't loaded"))?;
-        let text = doc.get(chunk)?;
-        let summary = self.summary.get(&chunk.doc).map(|s| s.as_str());
         Ok(DocRef {
-            summary,
-            text,
+            summary: doc.saved.summary.as_ref().map(|s| s.as_str()),
+            text: doc.get(chunk)?,
             original_path: doc.decoded.original_path(),
             decoded_path: doc.decoded.decoded_path(),
         })

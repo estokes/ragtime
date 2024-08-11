@@ -349,6 +349,7 @@ where
         let args: Args = serde_json::from_reader(File::open(path.as_ref())?)?;
         let new_index = |dims| -> Result<Index> {
             let index = Index::new(&index_options(dims))?;
+            index.reserve(10)?;
             let mut path = PathBuf::from(path.as_ref());
             path.set_extension("usearch");
             let path = path.to_string_lossy();

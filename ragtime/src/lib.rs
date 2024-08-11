@@ -99,6 +99,31 @@ pub struct SearchResult {
     pub text: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum SummarySpec {
+    None,
+    Generate,
+    Summary(String),
+}
+
+impl Default for SummarySpec {
+    fn default() -> Self {
+        SummarySpec::Generate
+    }
+}
+
+impl From<String> for SummarySpec {
+    fn from(value: String) -> Self {
+        SummarySpec::Summary(value)
+    }
+}
+
+impl<'a> From<&'a str> for SummarySpec {
+    fn from(value: &'a str) -> Self {
+        SummarySpec::Summary(value.into())
+    }
+}
+
 /** RagQa encapsulates the RAG workflow into a simple api that makes
 the core operations single method calls.
 
@@ -190,9 +215,10 @@ where
         })
     }
 
-    pub fn add_document<P: AsRef<Path>>(
+    pub fn add_document<P: AsRef<Path>, S: Into<SummarySpec>>(
         &mut self,
         doc: P,
+        summary: S,
         chunk_size: usize,
         overlap: usize,
     ) -> Result<()> {
@@ -203,19 +229,23 @@ where
             return Ok(());
         }
         let decoded = self.docs.decoder_mut().decode(doc.as_ref())?;
-        let summary = {
-            let txt = fs::read_to_string(dbg!(decoded.decoded_path()))?;
-            if txt.len() >= 512 {
-                let mut summary = String::new();
-                let mut prompt = Q::Prompt::new();
-                write!(prompt.system(), "Please write a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
-                write!(prompt.user(), "{}", txt)?;
-                for tok in self.qa.ask(prompt.finalize()?, None)? {
-                    summary.push_str(&tok?);
+        let summary = match summary.into() {
+            SummarySpec::None => None,
+            SummarySpec::Summary(s) => Some(s),
+            SummarySpec::Generate => {
+                let txt = fs::read_to_string(dbg!(decoded.decoded_path()))?;
+                if txt.len() >= 128 {
+                    let mut summary = String::new();
+                    let mut prompt = Q::Prompt::new();
+                    write!(prompt.system(), "Please write a brief summary of the text. Try to squeeze all the major concepts in under 300 words.")?;
+                    write!(prompt.user(), "{}", txt)?;
+                    for tok in self.qa.ask(prompt.finalize()?, None)? {
+                        summary.push_str(&tok?);
+                    }
+                    Some(summary)
+                } else {
+                    None
                 }
-                Some(summary)
-            } else {
-                None
             }
         };
         let chunks = self

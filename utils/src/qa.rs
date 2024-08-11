@@ -1,12 +1,15 @@
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::Parser;
+use fxhash::FxHashMap;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use ragtime::{
     gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, llama, phi3::llama::Phi3, EmbedModel,
-    QaModel, RagQa,
+    QaModel, RagQa, SummarySpec,
 };
 use std::{
+    collections::HashMap,
+    fs,
     io::{stdin, stdout, BufRead, BufReader, Write},
     path::PathBuf,
     sync::Arc,
@@ -74,6 +77,8 @@ struct Args {
         help = "do not question, only retreive and display matching document chunks"
     )]
     retrieve_only: bool,
+    #[arg(long, help = "path to a json file containing pre computed summaries")]
+    summaries: Option<PathBuf>,
 }
 
 impl Args {
@@ -133,8 +138,16 @@ impl Args {
 pub fn main() -> Result<()> {
     let args = Args::parse();
     let (view, mut qa) = args.init()?;
+    let summaries: FxHashMap<PathBuf, String> = match args.summaries {
+        None => HashMap::default(),
+        Some(p) => serde_json::from_str(&fs::read_to_string(&p)?)?,
+    };
     for doc in &args.add_document {
-        if let Err(e) = qa.add_document(doc, args.chunk_size, args.overlap_size) {
+        let summary = match summaries.get(&*doc) {
+            None => SummarySpec::Generate,
+            Some(s) => SummarySpec::Summary(s.clone()),
+        };
+        if let Err(e) = qa.add_document(doc, summary, args.chunk_size, args.overlap_size) {
             eprintln!("failed to add document: {e:?}")
         }
     }

@@ -5,7 +5,6 @@ lto = true
 debug = false
 
 [workspace.dependencies]
-arcstr = { version = "1", features = ["serde"] }
 ort = "2.0.0-rc.2"
 anyhow = "1"
 tracing-subscriber = "0.3"

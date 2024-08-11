@@ -17,7 +17,6 @@ native = ["llama-cpp-2/native"]
 cuda = ["llama-cpp-2/cuda"]
 
 [dependencies]
-arcstr = { workspace = true }
 ort = { workspace = true }
 anyhow = { workspace = true }
 tracing-subscriber = { workspace = true }

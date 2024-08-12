@@ -138,14 +138,14 @@ impl Args {
 pub fn main() -> Result<()> {
     let args = Args::parse();
     let (view, mut qa) = args.init()?;
-    let summaries: FxHashMap<PathBuf, String> = match args.summaries {
+    let summaries: FxHashMap<PathBuf, Option<String>> = match args.summaries {
         None => HashMap::default(),
         Some(p) => serde_json::from_str(&fs::read_to_string(&p)?)?,
     };
     for doc in &args.add_document {
         let summary = match summaries.get(&*doc) {
-            None => SummarySpec::Generate,
-            Some(s) => SummarySpec::Summary(s.clone()),
+            None | Some(None) => SummarySpec::Generate,
+            Some(Some(s)) => SummarySpec::Summary(s.clone()),
         };
         if let Err(e) = qa.add_document(doc, summary, args.chunk_size, args.overlap_size) {
             eprintln!("failed to add document: {e:?}")

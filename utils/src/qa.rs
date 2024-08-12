@@ -16,6 +16,12 @@ use std::{
     thread::available_parallelism,
 };
 
+struct Ctx {
+    view: bool,
+    qa: RagQa<GteQwen27bInstruct, Phi3>,
+    summaries: FxHashMap<PathBuf, Option<String>>,
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -82,8 +88,12 @@ struct Args {
 }
 
 impl Args {
-    fn init(&self) -> Result<(bool, RagQa<GteQwen27bInstruct, Phi3>)> {
+    fn init(&self) -> Result<Ctx> {
         tracing_subscriber::fmt::init();
+        let summaries: FxHashMap<PathBuf, Option<String>> = match &self.summaries {
+            None => HashMap::default(),
+            Some(p) => serde_json::from_str(&fs::read_to_string(p)?)?,
+        };
         let backend = Arc::new({
             let mut be = LlamaBackend::init()?;
             if self.quiet {
@@ -99,7 +109,11 @@ impl Args {
                 cp,
                 view,
             ) {
-                return Ok((view, qa));
+                return Ok(Ctx {
+                    view,
+                    qa,
+                    summaries,
+                });
             }
         }
         let emb_model = self
@@ -131,29 +145,29 @@ impl Args {
                 .with_gpu_layers(self.qa_gpu_layers),
         )?;
         let qa = RagQa::new(self.max_mapped, embed, qa)?;
-        Ok((false, qa))
+        Ok(Ctx {
+            view: false,
+            qa,
+            summaries,
+        })
     }
 }
 
 pub fn main() -> Result<()> {
     let args = Args::parse();
-    let (view, mut qa) = args.init()?;
-    let summaries: FxHashMap<PathBuf, Option<String>> = match args.summaries {
-        None => HashMap::default(),
-        Some(p) => serde_json::from_str(&fs::read_to_string(&p)?)?,
-    };
+    let mut ctx = args.init()?;
     for doc in &args.add_document {
-        let summary = match summaries.get(&*doc) {
+        let summary = match ctx.summaries.get(&*doc) {
             None | Some(None) => SummarySpec::Generate,
             Some(Some(s)) => SummarySpec::Summary(s.clone()),
         };
-        if let Err(e) = qa.add_document(doc, summary, args.chunk_size, args.overlap_size) {
+        if let Err(e) = ctx.qa.add_document(doc, summary, args.chunk_size, args.overlap_size) {
             eprintln!("failed to add document: {e:?}")
         }
     }
     if let Some(cp) = &args.checkpoint {
-        if !view {
-            qa.save(cp)?;
+        if !ctx.view {
+            ctx.qa.save(cp)?;
         }
     }
     let mut line = String::new();
@@ -165,11 +179,11 @@ pub fn main() -> Result<()> {
         stdin.read_line(&mut line)?;
         let start = Utc::now();
         if args.retrieve_only {
-            for res in qa.search(&line, 3)? {
+            for res in ctx.qa.search(&line, 3)? {
                 println!("{res:?}")
             }
         } else {
-            for tok in qa.ask(&line, None)? {
+            for tok in ctx.qa.ask(&line, None)? {
                 let tok = tok?;
                 print!("{tok}");
                 stdout().flush()?;

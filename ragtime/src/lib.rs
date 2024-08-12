@@ -2,7 +2,7 @@ use crate::doc::{ChunkId, DocStore};
 use anyhow::{anyhow, bail, Result};
 use compact_str::CompactString;
 use ort::Session;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::{
     cmp::min,
     fmt::Debug,
@@ -248,23 +248,25 @@ where
                 }
             }
         };
-        let chunks = self
-            .docs
-            .add_document(doc, summary.as_ref(), chunk_size, overlap)?
-            .map(|r| {
-                r.and_then(|(id, s)| {
-                    let mut prompt = E::EmbedPrompt::new();
-                    write!(prompt.user(), "{s}")?;
-                    Ok((id, prompt.finalize()?))
-                })
-            })
-            .collect::<Result<SmallVec<[_; 128]>>>()?;
+        let mut chunks: SmallVec<[_; 128]> = smallvec![];
+        self.docs
+            .add_document(doc.as_ref(), summary.as_ref(), chunk_size, overlap, |id, s| {
+                let mut prompt = E::EmbedPrompt::new();
+                write!(prompt.user(), "{s}")?;
+                chunks.push((id, prompt.finalize()?));
+                Ok(())
+            })?;
         let mut p = E::EmbedPrompt::new();
         if let Some(summary) = summary {
             write!(p.user(), "{summary}")?;
         }
-        self.db.add(p.finalize()?, &chunks)?;
-        Ok(())
+        match self.db.add(p.finalize()?, &chunks) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.docs.remove_document(doc.as_ref());
+                Err(e)
+            }
+        }
     }
 
     /// add or override a custom decoder for a specific mime type. The decoder takes the path
@@ -294,8 +296,7 @@ where
             } else {
                 for (id, dist) in matches.keys.iter().zip(matches.distances.iter()) {
                     if *dist <= 0.7 {
-                        let chunk = self.docs.get_chunk(*id)?;
-                        let doc = self.docs.get(&chunk)?;
+                        let doc = self.docs.get_chunk_ref(*id)?;
                         write!(dst, "Document Path {:?}\n", doc.original_path)?;
                         if let Some(summary) = doc.summary.as_ref() {
                             write!(dst, "Document Summary\n{}\n", summary)?;
@@ -329,8 +330,7 @@ where
             .iter()
             .zip(matches.distances.iter())
             .map(|(id, dist)| {
-                let chunk = self.docs.get_chunk(*id)?;
-                let doc = self.docs.get(&chunk)?;
+                let doc = self.docs.get_chunk_ref(*id)?;
                 Ok(SearchResult {
                     distance: *dist,
                     path: doc.original_path.to_owned(),

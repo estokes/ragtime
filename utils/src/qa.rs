@@ -192,7 +192,8 @@ pub fn main() -> Result<()> {
                 } else {
                     eprintln!("document {path:?} has changed since it was indexed, reindexing");
                     ctx.qa.remove_document(&path)?;
-                    ctx.qa.add_document(&path, SummarySpec::Generate, args.chunk_size, args.overlap_size)?
+                    ctx.qa.add_document(&path, SummarySpec::Generate, args.chunk_size, args.overlap_size)?;
+                    ctx.qa.save(cp)?;
                 }
             }
         }

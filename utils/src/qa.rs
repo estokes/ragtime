@@ -188,7 +188,7 @@ pub fn main() -> Result<()> {
                     }
                 };
                 if ctx.view {
-                    bail!("changed documents are the index is loaded as a view. use --no-view")
+                    bail!("changed documents and the index is loaded as a view. use --no-view")
                 } else {
                     eprintln!("document {path:?} has changed since it was indexed, reindexing");
                     ctx.qa.remove_document(&path)?;

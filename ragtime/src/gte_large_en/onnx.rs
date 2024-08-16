@@ -90,6 +90,13 @@ impl EmbedModel for GteLargeEn {
         })
     }
 
+    fn remove(&mut self, chunks: &[ChunkId]) -> Result<()> {
+        for id in chunks {
+            self.index.remove(id.0)?;
+        }
+        Ok(())
+    }
+
     fn add(
         &mut self,
         summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,

@@ -377,6 +377,13 @@ where
         Self::init_with_index(|dims| Ok(Index::new(&index_options(dims))?), ctx, args)
     }
 
+    fn remove(&mut self, chunks: &[ChunkId]) -> Result<()> {
+        for id in chunks {
+            self.index.remove(id.0)?;
+        }
+        Ok(())
+    }
+
     fn add(
         &mut self,
         summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,

@@ -110,6 +110,13 @@ impl EmbedModel for BgeM3 {
         Ok(())
     }
 
+    fn remove(&mut self, chunks: &[ChunkId]) -> Result<()> {
+        for id in chunks {
+            self.index.remove(id.0)?;
+        }
+        Ok(())
+    }
+
     /// The keys component of Matches is a vec of ChunkIds represented as u64s.
     fn search(
         &mut self,

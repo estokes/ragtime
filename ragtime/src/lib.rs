@@ -71,6 +71,7 @@ pub trait EmbedModel: Sized {
         summary: <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt,
         text: &[(ChunkId, <Self::EmbedPrompt as FormattedPrompt>::FinalPrompt)],
     ) -> Result<()>;
+    fn remove(&mut self, chunks: &[ChunkId]) -> Result<()>;
     fn search(
         &mut self,
         q: <Self::SearchPrompt as FormattedPrompt>::FinalPrompt,

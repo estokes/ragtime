@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 use clap::Parser;
 use fxhash::FxHashMap;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use ragtime::{
-    gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, llama, phi3::llama::Phi3, EmbedModel,
-    QaModel, RagQa, SummarySpec,
+    doc::DocumentChanged, gte_qwen2_7b_instruct::llama::GteQwen27bInstruct, llama,
+    phi3::llama::Phi3, EmbedModel, QaModel, RagQa, SummarySpec,
 };
 use std::{
     collections::HashMap,
@@ -85,6 +85,8 @@ struct Args {
     retrieve_only: bool,
     #[arg(long, help = "path to a json file containing pre computed summaries")]
     summaries: Option<PathBuf>,
+    #[arg(long, help = "do not load the index as a view even if not docs are being added")]
+    no_view: bool,
 }
 
 impl Args {
@@ -102,7 +104,7 @@ impl Args {
             be
         });
         if let Some(cp) = &self.checkpoint {
-            let view = self.add_document.is_empty();
+            let view = self.add_document.is_empty() && !self.no_view;
             if let Ok(qa) = RagQa::<GteQwen27bInstruct, Phi3>::load(
                 Arc::clone(&backend),
                 Arc::clone(&backend),
@@ -161,7 +163,10 @@ pub fn main() -> Result<()> {
             None | Some(None) => SummarySpec::Generate,
             Some(Some(s)) => SummarySpec::Summary(s.clone()),
         };
-        if let Err(e) = ctx.qa.add_document(doc, summary, args.chunk_size, args.overlap_size) {
+        if let Err(e) = ctx
+            .qa
+            .add_document(doc, summary, args.chunk_size, args.overlap_size)
+        {
             eprintln!("failed to add document: {e:?}")
         }
     }
@@ -172,6 +177,26 @@ pub fn main() -> Result<()> {
     }
     let mut line = String::new();
     let mut stdin = BufReader::new(stdin());
+    macro_rules! maybe_reindex {
+        ($do:expr) => {
+            loop {
+                let path = match $do {
+                    Ok(iter) => break iter,
+                    Err(e) => match e.downcast::<DocumentChanged>() {
+                        Ok(DocumentChanged(path)) => path,
+                        Err(e) => return Err(e),
+                    }
+                };
+                if ctx.view {
+                    bail!("changed documents are the index is loaded as a view. use --no-view")
+                } else {
+                    eprintln!("document {path:?} has changed since it was indexed, reindexing");
+                    ctx.qa.remove_document(&path)?;
+                    ctx.qa.add_document(&path, SummarySpec::Generate, args.chunk_size, args.overlap_size)?
+                }
+            }
+        }
+    }
     loop {
         line.clear();
         print!("ready> ");
@@ -179,11 +204,13 @@ pub fn main() -> Result<()> {
         stdin.read_line(&mut line)?;
         let start = Utc::now();
         if args.retrieve_only {
-            for res in ctx.qa.search(&line, 3)? {
+            let iter = maybe_reindex!(ctx.qa.search(&line, 3));
+            for res in iter {
                 println!("{res:?}")
             }
         } else {
-            for tok in ctx.qa.ask(&line, None)? {
+            let iter = maybe_reindex!(ctx.qa.ask(&line, None));
+            for tok in iter {
                 let tok = tok?;
                 print!("{tok}");
                 stdout().flush()?;

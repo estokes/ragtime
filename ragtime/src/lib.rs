@@ -208,6 +208,11 @@ where
     E: EmbedModel,
     Q: QaModel,
 {
+    /// Create a new RagQa with the specified embedding and qa
+    /// model. [max_mapped] is the maximum number of documents that
+    /// will be decoded and memory mapped at any given time. If you
+    /// set this to a very large number remember to increase the
+    /// number of allowed open file descriptors to match.
     pub fn new(max_mapped: usize, db: E, qa: Q) -> Result<Self> {
         Ok(Self {
             docs: DocStore::new(max_mapped)?,
@@ -216,6 +221,32 @@ where
         })
     }
 
+    /// Remove the specified document from the embedding database
+    ///
+    /// Note, this will not work if you opened the embedding model
+    /// with view = true, an error will be raised in that case. To
+    /// persist the changes you must call [save].
+    pub fn remove_document<P: AsRef<Path>>(&mut self, doc: P) -> Result<()> {
+        self.db.remove(&self.docs.remove_document(doc))
+    }
+
+    /// Add the specified document to the embedding database.
+    ///
+    /// The document will be decoded to text with the configured
+    /// decoder. The document summary may be provided, omitted, or
+    /// computed with the QA model. The document will then be divided
+    /// into chunks of [chunk_size] tokens, with overlap between
+    /// chunks of [overlap] tokens. The embedding will be computed for
+    /// each chunk and added to the embedding of the summary
+    /// (multiplied by 0.5), and the resulting vector will be added to
+    /// the vector database and tied to the document and the specific
+    /// chunk.
+    ///
+    /// The document will not be copied. If it changes before queries
+    /// are made the system will detect that it's md5 sum has changed
+    /// and will raise an error.
+    ///
+    /// To persist changes you must call [save]
     pub fn add_document<P: AsRef<Path>, S: Into<SummarySpec>>(
         &mut self,
         doc: P,
@@ -250,13 +281,18 @@ where
             }
         };
         let mut chunks: SmallVec<[_; 128]> = smallvec![];
-        self.docs
-            .add_document(doc.as_ref(), summary.as_ref(), chunk_size, overlap, |id, s| {
+        self.docs.add_document(
+            doc.as_ref(),
+            summary.as_ref(),
+            chunk_size,
+            overlap,
+            |id, s| {
                 let mut prompt = E::EmbedPrompt::new();
                 write!(prompt.user(), "{s}")?;
                 chunks.push((id, prompt.finalize()?));
                 Ok(())
-            })?;
+            },
+        )?;
         let mut p = E::EmbedPrompt::new();
         if let Some(summary) = summary {
             write!(p.user(), "{summary}")?;
@@ -311,6 +347,16 @@ where
         Ok(prompt.finalize()?)
     }
 
+    /// Ask the QA model a question. The QA model will be fed the
+    /// relevant document path, summary, and the specific matching
+    /// chunk as a system prompt. [gen_max] is the maxiumum number of
+    /// tokens to generate, if it isn't specified then the model will
+    /// decide to stop generating tokens when it is finished answering
+    /// the question.
+    ///
+    /// If the document's md5 sum has changed since it was first
+    /// embedded this will return [Err(DocumentChanged)] before
+    /// generating any tokens.
     pub fn ask<'a, S: AsRef<str>>(
         &'a mut self,
         q: S,
@@ -321,7 +367,12 @@ where
         self.qa.ask(prompt, gen_max)
     }
 
-    pub fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<Vec<SearchResult>> {
+    /// Search the vector database for document chunks that match the
+    /// specified question.
+    ///
+    /// If the document's md5 sum has changed since it was first
+    /// embedded this will return [Err(DocumentChanged)].
+    pub fn search<S: AsRef<str>>(&mut self, q: S, n: usize) -> Result<SmallVec<[SearchResult; 4]>> {
         use std::fmt::Write;
         let mut sprompt = E::SearchPrompt::new();
         write!(sprompt.user(), "{}", q.as_ref())?;

@@ -19,7 +19,7 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct DocumentChanged(PathBuf);
+pub struct DocumentChanged(pub PathBuf);
 
 impl Display for DocumentChanged {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -363,10 +363,10 @@ impl DocStore {
     }
 
     /// Remove the specified document from the document store
-    pub fn remove_document<P: AsRef<Path>>(&mut self, path: P) {
+    pub fn remove_document<P: AsRef<Path>>(&mut self, path: P) -> Vec<ChunkId> {
         let id = match self.by_path.remove(path.as_ref()) {
             Some(id) => id,
-            None => return,
+            None => return vec![],
         };
         let saved = match self.mapped.swap_remove(&id) {
             Some(doc) => {
@@ -375,12 +375,13 @@ impl DocStore {
             }
             None => match self.unmapped.remove(&id) {
                 Some(saved) => saved,
-                None => return
+                None => return vec![]
             }
         };
-        for id in saved.chunks {
-            self.chunks.remove(&id);
+        for id in &saved.chunks {
+            self.chunks.remove(id);
         }
+        saved.chunks
     }
 
     fn gc(&mut self) {

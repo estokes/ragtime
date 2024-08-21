@@ -1,0 +1,16 @@
+0.2.0
+
+- add document -> text decoder api, and a bunch of decoders for common
+  document types on unix systems (sorry windows users, you have to
+  define your own decoders from scratch)
+
+- track document md5 sums to determine if the source has changed and
+  raise an easily catchable error in this case (see qa.rs)
+
+- actually enforce open document limits
+
+- implement document removal
+
+0.1.0
+
+- initial release

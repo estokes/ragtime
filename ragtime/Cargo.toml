@@ -8,7 +8,7 @@ documentation = "https://docs.rs/ragtime"
 readme = "../README.md"
 keywords = ["ai", "rag", "phi3"]
 categories = ["text-processing"]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [features]
